@@ -83,25 +83,60 @@ export const UtmShortenerStudio: React.FC = () => {
   const [customMedium, setCustomMedium] = useState('');
   const [customCount, setCustomCount] = useState(1);
 
-  // Persist channels in localStorage
+  // Load channels from server DB on mount so any computer/device sees the same channels
   useEffect(() => {
-    localStorage.setItem('omnya_standalone_channels', JSON.stringify(channels));
-  }, [channels]);
+    fetch('/api/channels')
+      .then(res => res.json())
+      .then(json => {
+        if (json.data && json.data.length > 0) {
+          setChannels(json.data);
+          localStorage.setItem('omnya_standalone_channels', JSON.stringify(json.data));
+        }
+      })
+      .catch(err => console.error('Error fetching server channels:', err));
+  }, []);
 
   const toggleChannel = (id: string) => {
-    setChannels(prev => prev.map(c => c.id === id ? { ...c, enabled: !c.enabled } : c));
+    setChannels(prev => {
+      const updated = prev.map(c => c.id === id ? { ...c, enabled: !c.enabled } : c);
+      const ch = updated.find(c => c.id === id);
+      if (ch) saveChannelToServer(ch);
+      return updated;
+    });
   };
 
   const updateChannel = (id: string, updates: Partial<ChannelPreset>) => {
-    setChannels(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+    setChannels(prev => {
+      const updated = prev.map(c => c.id === id ? { ...c, ...updates } : c);
+      const ch = updated.find(c => c.id === id);
+      if (ch) saveChannelToServer(ch);
+      return updated;
+    });
   };
 
-  const removeChannel = (id: string, e: React.MouseEvent) => {
+  const saveChannelToServer = async (channel: ChannelPreset) => {
+    try {
+      await fetch('/api/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(channel)
+      });
+    } catch (e) {
+      console.error('Error saving channel to server:', e);
+    }
+  };
+
+  const removeChannel = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setChannels(prev => prev.filter(c => c.id !== id));
+    try {
+      await fetch(`/api/channels/${id}`, { method: 'DELETE' });
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const handleAddCustomChannel = () => {
+  const handleAddCustomChannel = async () => {
     if (!customName.trim() || !customSource.trim() || !customMedium.trim()) {
       alert('Por favor completa el nombre, utm_source y utm_medium.');
       return;
@@ -119,6 +154,8 @@ export const UtmShortenerStudio: React.FC = () => {
     };
 
     setChannels(prev => [newChan, ...prev]);
+    saveChannelToServer(newChan);
+
     setCustomName('');
     setCustomMedium('');
     setCustomCount(1);

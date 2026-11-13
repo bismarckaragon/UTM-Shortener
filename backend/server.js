@@ -221,6 +221,75 @@ app.delete('/api/links/:id', (req, res) => {
 });
 
 // -------------------------------------------------------------
+// CHANNEL PRESETS API (Save & Sync across all devices)
+// -------------------------------------------------------------
+app.get('/api/channels', (req, res) => {
+  try {
+    const channels = db.prepare('SELECT * FROM channel_presets ORDER BY rowid ASC').all();
+    const formatted = channels.map(c => ({
+      id: c.id,
+      name: c.name,
+      category: c.category,
+      source: c.source,
+      medium: c.medium,
+      enabled: Boolean(c.enabled),
+      count: c.count,
+      customItems: c.custom_items,
+      variationType: c.variation_type
+    }));
+    res.json({ success: true, data: formatted });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/channels', (req, res) => {
+  try {
+    const { id, name, category, source, medium, enabled, count, customItems, variationType } = req.body;
+    if (!id || !name || !source || !medium) {
+      return res.status(400).json({ error: 'Faltan campos obligatorios' });
+    }
+
+    db.prepare(`
+      INSERT INTO channel_presets (id, name, category, source, medium, enabled, count, custom_items, variation_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        category = excluded.category,
+        source = excluded.source,
+        medium = excluded.medium,
+        enabled = excluded.enabled,
+        count = excluded.count,
+        custom_items = excluded.custom_items,
+        variation_type = excluded.variation_type
+    `).run(
+      id,
+      name,
+      category || 'other',
+      source,
+      medium,
+      enabled ? 1 : 0,
+      count || 1,
+      customItems || '',
+      variationType || 'content'
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/channels/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM channel_presets WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------------------------------------------------------------
 // 3. ANALYTICS API (Comprehensive dashboard metrics)
 // -------------------------------------------------------------
 app.get('/api/analytics', (req, res) => {
