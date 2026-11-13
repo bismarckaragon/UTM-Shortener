@@ -6,7 +6,9 @@ import {
   ExternalLink,
   Trash2,
   Search,
-  MousePointerClick
+  MousePointerClick,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 
 interface LinkItem {
@@ -29,6 +31,8 @@ export const LinkManager: React.FC = () => {
   const [_loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchLinks = async () => {
     setLoading(true);
@@ -58,8 +62,49 @@ export const LinkManager: React.FC = () => {
     try {
       await fetch(`/api/links/${id}`, { method: 'DELETE' });
       setLinks(prev => prev.filter(l => l.id !== id));
+      setSelectedIds(prev => prev.filter(i => i !== id));
     } catch (e) {
       alert('Error eliminando enlace');
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.length === 0) return;
+    if (!window.confirm(`¿Seguro que deseas eliminar los ${selectedIds.length} enlaces seleccionados? Esta acción no se puede deshacer.`)) return;
+
+    setIsDeleting(true);
+    try {
+      const res = await fetch('/api/links/delete-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedIds })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setLinks(prev => prev.filter(l => !selectedIds.includes(l.id)));
+        setSelectedIds([]);
+      } else {
+        alert(data.error || 'Error al eliminar enlaces.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error al conectar con el servidor.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const toggleSelectOne = (id: number) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === filtered.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filtered.map(l => l.id));
     }
   };
 
@@ -87,7 +132,30 @@ export const LinkManager: React.FC = () => {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          {selectedIds.length > 0 && (
+            <button
+              onClick={handleDeleteSelected}
+              disabled={isDeleting}
+              style={{
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid var(--error)',
+                color: 'var(--error)',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              <Trash2 size={16} />
+              <span>{isDeleting ? 'Eliminando...' : `Eliminar Seleccionados (${selectedIds.length})`}</span>
+            </button>
+          )}
+
           <div style={{ position: 'relative' }}>
             <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '10px' }} />
             <input
@@ -118,6 +186,15 @@ export const LinkManager: React.FC = () => {
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                <th style={{ padding: '12px 14px', width: '40px', textAlign: 'center' }}>
+                  <div onClick={toggleSelectAll} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+                    {selectedIds.length > 0 && selectedIds.length === filtered.length ? (
+                      <CheckSquare size={16} color="var(--primary-hover)" />
+                    ) : (
+                      <Square size={16} color="var(--text-muted)" />
+                    )}
+                  </div>
+                </th>
                 <th style={{ padding: '12px 14px' }}>ENLACE CORTO</th>
                 <th style={{ padding: '12px 14px' }}>CANAL / CAMPAÑA</th>
                 <th style={{ padding: '12px 14px' }}>CONTENIDO (utm_content)</th>
@@ -127,104 +204,122 @@ export const LinkManager: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(item => (
-                <tr key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                  <td style={{ padding: '12px 14px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <code style={{ color: 'var(--secondary-hover)', fontWeight: 600, fontSize: '0.9rem' }}>
-                        /{item.slug}
-                      </code>
-                    </div>
-                  </td>
-                  <td style={{ padding: '12px 14px' }}>
-                    <div style={{ fontWeight: 600, color: '#fff' }}>{item.channel_name}</div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{item.campaign_name}</div>
-                  </td>
-                  <td style={{ padding: '12px 14px' }}>
-                    {item.utm_content ? (
-                      <span style={{ background: 'rgba(236, 72, 153, 0.15)', color: 'var(--accent)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem' }}>
-                        {item.utm_content}
+              {filtered.map(item => {
+                const isSelected = selectedIds.includes(item.id);
+                return (
+                  <tr
+                    key={item.id}
+                    style={{
+                      borderBottom: '1px solid rgba(255,255,255,0.03)',
+                      background: isSelected ? 'rgba(124, 58, 237, 0.08)' : 'transparent'
+                    }}
+                  >
+                    <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                      <div onClick={() => toggleSelectOne(item.id)} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+                        {isSelected ? (
+                          <CheckSquare size={16} color="var(--primary-hover)" />
+                        ) : (
+                          <Square size={16} color="var(--text-muted)" />
+                        )}
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px 14px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <code style={{ color: 'var(--secondary-hover)', fontWeight: 600, fontSize: '0.9rem' }}>
+                          /{item.slug}
+                        </code>
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px 14px' }}>
+                      <div style={{ fontWeight: 600, color: '#fff' }}>{item.channel_name}</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{item.campaign_name}</div>
+                    </td>
+                    <td style={{ padding: '12px 14px' }}>
+                      {item.utm_content ? (
+                        <span style={{ background: 'rgba(236, 72, 153, 0.15)', color: 'var(--accent)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem' }}>
+                          {item.utm_content}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>-</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: item.clicks_count > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255,255,255,0.04)',
+                        color: item.clicks_count > 0 ? 'var(--success)' : 'var(--text-muted)',
+                        padding: '4px 10px',
+                        borderRadius: '12px',
+                        fontWeight: 700
+                      }}>
+                        <MousePointerClick size={12} />
+                        <span>{item.clicks_count}</span>
                       </span>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)' }}>-</span>
-                    )}
-                  </td>
-                  <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                    <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      background: item.clicks_count > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255,255,255,0.04)',
-                      color: item.clicks_count > 0 ? 'var(--success)' : 'var(--text-muted)',
-                      padding: '4px 10px',
-                      borderRadius: '12px',
-                      fontWeight: 700
-                    }}>
-                      <MousePointerClick size={12} />
-                      <span>{item.clicks_count}</span>
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px 14px', maxWidth: '250px' }}>
-                    <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-secondary)' }} title={item.destination_url}>
-                      {item.destination_url}
-                    </div>
-                  </td>
-                  <td style={{ padding: '12px 14px', textAlign: 'right' }}>
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                      <button
-                        onClick={() => handleCopy(item.shortUrl, item.id)}
-                        style={{
-                          background: copiedId === item.id ? 'var(--success)' : 'rgba(255,255,255,0.06)',
-                          border: '1px solid var(--border-color)',
-                          color: copiedId === item.id ? '#fff' : 'var(--text-primary)',
-                          padding: '6px 10px',
-                          borderRadius: '6px',
-                          fontSize: '0.75rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {copiedId === item.id ? <Check size={12} /> : <Copy size={12} />}
-                        <span>{copiedId === item.id ? 'Copiado' : 'Copiar'}</span>
-                      </button>
+                    </td>
+                    <td style={{ padding: '12px 14px', maxWidth: '250px' }}>
+                      <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-secondary)' }} title={item.destination_url}>
+                        {item.destination_url}
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                        <button
+                          onClick={() => handleCopy(item.shortUrl, item.id)}
+                          style={{
+                            background: copiedId === item.id ? 'var(--success)' : 'rgba(255,255,255,0.06)',
+                            border: '1px solid var(--border-color)',
+                            color: copiedId === item.id ? '#fff' : 'var(--text-primary)',
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            fontSize: '0.75rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {copiedId === item.id ? <Check size={12} /> : <Copy size={12} />}
+                          <span>{copiedId === item.id ? 'Copiado' : 'Copiar'}</span>
+                        </button>
 
-                      <a
-                        href={item.shortUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          background: 'rgba(255,255,255,0.06)',
-                          border: '1px solid var(--border-color)',
-                          color: 'var(--text-muted)',
-                          padding: '6px 8px',
-                          borderRadius: '6px',
-                          display: 'flex',
-                          alignItems: 'center'
-                        }}
-                        title="Probar enlace corto"
-                      >
-                        <ExternalLink size={12} />
-                      </a>
+                        <a
+                          href={item.shortUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            background: 'rgba(255,255,255,0.06)',
+                            border: '1px solid var(--border-color)',
+                            color: 'var(--text-muted)',
+                            padding: '6px 8px',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                          title="Probar enlace corto"
+                        >
+                          <ExternalLink size={12} />
+                        </a>
 
-                      <button
-                        onClick={() => handleDelete(item.id)}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: 'var(--text-muted)',
-                          padding: '6px',
-                          cursor: 'pointer'
-                        }}
-                        title="Eliminar"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        <button
+                          onClick={() => handleDelete(item.id)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--text-muted)',
+                            padding: '6px',
+                            cursor: 'pointer'
+                          }}
+                          title="Eliminar"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

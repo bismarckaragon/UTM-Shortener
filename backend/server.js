@@ -210,11 +210,27 @@ app.get('/api/links', (req, res) => {
   }
 });
 
-// Delete a link
+// Delete a single link
 app.delete('/api/links/:id', (req, res) => {
   try {
     db.prepare('DELETE FROM links WHERE id = ?').run(req.params.id);
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete multiple links in bulk
+app.post('/api/links/delete-batch', (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Debes enviar un arreglo de ids para eliminar.' });
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
+    db.prepare(`DELETE FROM links WHERE id IN (${placeholders})`).run(...ids);
+    res.json({ success: true, count: ids.length });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
