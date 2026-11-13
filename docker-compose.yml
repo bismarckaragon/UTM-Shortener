@@ -1,0 +1,18 @@
+services:
+  utm-shortener:
+  build:
+    context: .
+    dockerfile: Dockerfile
+  container_name: omnya-utm-shortener
+  restart: always
+  environment:
+    - PORT=4000
+    - BASE_DOMAIN=https://link.tudominio.com # Reemplazar con tu dominio en Coolify
+    - DATA_DIR=/app/backend/data
+  volumes:
+    - shortener_data:/app/backend/data
+  ports:
+    - "4000:4000"
+
+volumes:
+  shortener_data:

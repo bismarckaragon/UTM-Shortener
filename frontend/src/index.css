@@ -1,0 +1,56 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  color-scheme: dark;
+  color: #f8fafc;
+  background-color: #0b0f19;
+  --bg-main: #0b0f19;
+  --bg-surface: #131c31;
+  --border-color: #223150;
+  --primary: #7c3aed;
+  --primary-hover: #8b5cf6;
+  --primary-glow: rgba(124, 58, 237, 0.15);
+  --secondary: #06b6d4;
+  --secondary-hover: #22d3ee;
+  --accent: #ec4899;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --success: #10b981;
+  --error: #ef4444;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: radial-gradient(circle at top right, rgba(124, 58, 237, 0.1), transparent 50%),
+              radial-gradient(circle at bottom left, rgba(6, 182, 212, 0.08), transparent 50%),
+              var(--bg-main);
+  background-attachment: fixed;
+  color: var(--text-primary);
+}
+
+.glass-card {
+  background: rgba(19, 28, 49, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+
+button {
+  font-family: inherit;
+  transition: all 0.2s;
+}
+
+input, select {
+  font-family: inherit;
+  outline: none;
+}
+input:focus, select:focus {
+  border-color: var(--primary) !important;
+}
