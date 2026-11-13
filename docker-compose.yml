@@ -7,7 +7,7 @@ services:
     restart: always
     environment:
       - PORT=4000
-      - BASE_DOMAIN=https://link.tudominio.com # Reemplazar con tu dominio en Coolify
+      - BASE_DOMAIN=https://go.juditcatala.com
       - DATA_DIR=/app/backend/data
     volumes:
       - shortener_data:/app/backend/data
