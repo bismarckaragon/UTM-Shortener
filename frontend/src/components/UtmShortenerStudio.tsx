@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Copy,
   Check,
@@ -7,7 +7,10 @@ import {
   Sparkles,
   CheckSquare,
   Square,
-  Scissors
+  Scissors,
+  Plus,
+  Trash2,
+  RotateCcw
 } from 'lucide-react';
 
 interface ChannelPreset {
@@ -37,8 +40,10 @@ const DEFAULT_CHANNELS: ChannelPreset[] = [
   { id: 'google_pmax', name: 'Google Performance Max', category: 'search', source: 'google', medium: 'pmax', enabled: false, count: 1, variationType: 'content' },
 
   // Email y WhatsApp
-  { id: 'email_newsletter', name: 'Email Newsletter', category: 'email', source: 'newsletter', medium: 'email', enabled: true, count: 1, variationType: 'content' },
-  { id: 'whatsapp_msg', name: 'WhatsApp Grupos / Mensajes', category: 'email', source: 'whatsapp', medium: 'grupos_viejos', enabled: true, count: 5, customItems: 'mensaje1, mensaje2, mensaje3, mensaje4, mensaje5', variationType: 'content' },
+  { id: 'whatsapp_viejos', name: 'WhatsApp Grupos Viejos', category: 'email', source: 'whatsapp', medium: 'grupos_viejos', enabled: true, count: 5, customItems: 'mensaje1, mensaje2, mensaje3, mensaje4, mensaje5', variationType: 'content' },
+  { id: 'whatsapp_nuevos', name: 'WhatsApp Grupos Nuevos', category: 'email', source: 'whatsapp', medium: 'grupos_nuevos', enabled: true, count: 5, customItems: 'mensaje1, mensaje2, mensaje3, mensaje4, mensaje5', variationType: 'content' },
+  { id: 'whatsapp_directo', name: 'WhatsApp 1 a 1 / Directo', category: 'email', source: 'whatsapp', medium: 'directo', enabled: false, count: 1, variationType: 'content' },
+  { id: 'email_newsletter', name: 'Email Newsletter', category: 'email', source: 'newsletter', medium: 'email', enabled: false, count: 1, variationType: 'content' },
   { id: 'sms_campaign', name: 'SMS Difusión', category: 'email', source: 'sms', medium: 'sms', enabled: false, count: 1, variationType: 'content' }
 ];
 
@@ -71,12 +76,60 @@ export const UtmShortenerStudio: React.FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
 
+  // New Custom Channel / Custom Medium Drawer
+  const [showAddCustom, setShowAddCustom] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customSource, setCustomSource] = useState('whatsapp');
+  const [customMedium, setCustomMedium] = useState('');
+  const [customCount, setCustomCount] = useState(1);
+
+  // Persist channels in localStorage
+  useEffect(() => {
+    localStorage.setItem('omnya_standalone_channels', JSON.stringify(channels));
+  }, [channels]);
+
   const toggleChannel = (id: string) => {
     setChannels(prev => prev.map(c => c.id === id ? { ...c, enabled: !c.enabled } : c));
   };
 
   const updateChannel = (id: string, updates: Partial<ChannelPreset>) => {
     setChannels(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+  };
+
+  const removeChannel = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setChannels(prev => prev.filter(c => c.id !== id));
+  };
+
+  const handleAddCustomChannel = () => {
+    if (!customName.trim() || !customSource.trim() || !customMedium.trim()) {
+      alert('Por favor completa el nombre, utm_source y utm_medium.');
+      return;
+    }
+
+    const newChan: ChannelPreset = {
+      id: 'custom_' + Date.now(),
+      name: customName.trim(),
+      category: 'other',
+      source: customSource.trim().toLowerCase().replace(/\s+/g, '_'),
+      medium: customMedium.trim().toLowerCase().replace(/\s+/g, '_'),
+      enabled: true,
+      count: Math.max(1, customCount || 1),
+      variationType: 'content'
+    };
+
+    setChannels(prev => [newChan, ...prev]);
+    setCustomName('');
+    setCustomMedium('');
+    setCustomCount(1);
+    setShowAddCustom(false);
+  };
+
+  const handleResetToDefault = () => {
+    if (window.confirm('¿Deseas restaurar la lista a los canales predeterminados?')) {
+      setChannels(DEFAULT_CHANNELS);
+      localStorage.removeItem('omnya_standalone_channels');
+    }
   };
 
   const selectAll = (enabled: boolean) => {
@@ -293,14 +346,117 @@ export const UtmShortenerStudio: React.FC = () => {
         {/* Channels Section */}
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '18px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>Canales a generar ({channels.filter(c => c.enabled).length} seleccionados)</h3>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => selectAll(true)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer' }}>Todos</button>
-              <button onClick={() => selectAll(false)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer' }}>Ninguno</button>
+            <div>
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>Canales a generar ({channels.filter(c => c.enabled).length} seleccionados)</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', margin: '2px 0 0 0' }}>Puedes crear tus propios medios personalizados (ej. WhatsApp nuevos/viejos, SMS, etc.)</p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setShowAddCustom(!showAddCustom)}
+                style={{
+                  background: 'rgba(236, 72, 153, 0.15)',
+                  border: '1px solid rgba(236, 72, 153, 0.3)',
+                  color: 'var(--accent)',
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <Plus size={14} />
+                <span>+ Crear Medio Propio</span>
+              </button>
+
+              <button onClick={() => selectAll(true)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', padding: '5px 10px', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer' }}>Todos</button>
+              <button onClick={() => selectAll(false)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', padding: '5px 10px', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer' }}>Ninguno</button>
+              <button onClick={handleResetToDefault} title="Restaurar lista original" style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-muted)', padding: '5px 8px', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer' }}>
+                <RotateCcw size={12} />
+              </button>
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '12px', maxHeight: '350px', overflowY: 'auto' }}>
+          {/* Form to add a new custom channel / medium */}
+          {showAddCustom && (
+            <div style={{
+              background: 'rgba(15, 23, 42, 0.85)',
+              border: '1px solid var(--accent)',
+              borderRadius: '8px',
+              padding: '16px',
+              marginBottom: '16px',
+              display: 'flex',
+              gap: '12px',
+              alignItems: 'flex-end',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ flex: '1 1 200px' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Nombre Visible del Canal</label>
+                <input
+                  type="text"
+                  placeholder="ej. WhatsApp Grupos VIP"
+                  value={customName}
+                  onChange={e => setCustomName(e.target.value)}
+                  style={{ width: '100%', padding: '7px 10px', background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '0.85rem' }}
+                />
+              </div>
+
+              <div style={{ flex: '1 1 140px' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>utm_source (Fuente)</label>
+                <input
+                  type="text"
+                  placeholder="ej. whatsapp, telegram"
+                  value={customSource}
+                  onChange={e => setCustomSource(e.target.value)}
+                  style={{ width: '100%', padding: '7px 10px', background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '0.85rem' }}
+                />
+              </div>
+
+              <div style={{ flex: '1 1 150px' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>utm_medium (Tu Medio Propio)</label>
+                <input
+                  type="text"
+                  placeholder="ej. grupos_viejos, grupos_nuevos"
+                  value={customMedium}
+                  onChange={e => setCustomMedium(e.target.value)}
+                  style={{ width: '100%', padding: '7px 10px', background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '0.85rem' }}
+                />
+              </div>
+
+              <div style={{ width: '90px' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Cantidad</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={customCount}
+                  onChange={e => setCustomCount(parseInt(e.target.value) || 1)}
+                  style={{ width: '100%', padding: '7px 10px', background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '0.85rem', textAlign: 'center' }}
+                />
+              </div>
+
+              <button
+                onClick={handleAddCustomChannel}
+                style={{
+                  background: 'var(--accent)',
+                  border: 'none',
+                  color: '#fff',
+                  padding: '8px 18px',
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Guardar Canal
+              </button>
+            </div>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '12px', maxHeight: '380px', overflowY: 'auto' }}>
             {channels.map(channel => (
               <div
                 key={channel.id}
@@ -314,12 +470,24 @@ export const UtmShortenerStudio: React.FC = () => {
                   gap: '8px'
                 }}
               >
-                <div onClick={() => toggleChannel(channel.id)} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                  {channel.enabled ? <CheckSquare size={16} color="var(--primary-hover)" /> : <Square size={16} color="var(--text-muted)" />}
-                  <div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: channel.enabled ? '#fff' : 'var(--text-secondary)' }}>{channel.name}</div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>source: {channel.source} | medium: {channel.medium}</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div onClick={() => toggleChannel(channel.id)} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flex: 1 }}>
+                    {channel.enabled ? <CheckSquare size={16} color="var(--primary-hover)" /> : <Square size={16} color="var(--text-muted)" />}
+                    <div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: channel.enabled ? '#fff' : 'var(--text-secondary)' }}>{channel.name}</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>source: <code style={{ color: 'var(--secondary)' }}>{channel.source}</code> | medium: <code style={{ color: 'var(--accent)' }}>{channel.medium}</code></div>
+                    </div>
                   </div>
+
+                  {channel.id.startsWith('custom_') && (
+                    <button
+                      onClick={e => removeChannel(channel.id, e)}
+                      title="Eliminar canal"
+                      style={{ background: 'transparent', border: 'none', color: 'var(--error)', cursor: 'pointer', padding: '4px' }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
 
                 {channel.enabled && (
@@ -348,6 +516,18 @@ export const UtmShortenerStudio: React.FC = () => {
                           <option value="medium">utm_medium</option>
                         </select>
                       </div>
+                    </div>
+
+                    {/* Quick medium edit inline */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem' }}>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Medio:</span>
+                      <input
+                        type="text"
+                        value={channel.medium}
+                        onChange={e => updateChannel(channel.id, { medium: e.target.value.toLowerCase().replace(/\s+/g, '_') })}
+                        placeholder="utm_medium"
+                        style={{ flex: 1, padding: '2px 6px', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-color)', color: 'var(--accent)', borderRadius: '4px', fontSize: '0.72rem' }}
+                      />
                     </div>
 
                     {(channel.count && channel.count > 1) && (
