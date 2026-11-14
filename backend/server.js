@@ -380,16 +380,30 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       params.push(campaign);
     }
 
-    // Total links and total clicks
-    const summary = db.prepare(`
+    // 1. Total links count and fast clicks sum directly from links table
+    const linksSummary = db.prepare(`
       SELECT 
-        COUNT(DISTINCT l.id) as total_links,
-        COALESCE(SUM(l.clicks_count), 0) as total_clicks,
-        COUNT(DISTINCT c.ip_hash) as unique_visitors
+        COUNT(*) as total_links,
+        COALESCE(SUM(clicks_count), 0) as total_clicks
       FROM links l
-      LEFT JOIN clicks c ON c.link_id = l.id
       ${linkFilter}
     `).get(...params);
+
+    // 2. Real total events and unique visitors directly from clicks table
+    const clicksFilter = linkId ? 'WHERE link_id = ?' : campaign ? 'WHERE link_id IN (SELECT id FROM links WHERE campaign_name = ?)' : '';
+    const clicksSummary = db.prepare(`
+      SELECT 
+        COUNT(*) as recorded_clicks,
+        COUNT(DISTINCT ip_hash) as unique_visitors
+      FROM clicks
+      ${clicksFilter}
+    `).get(...params);
+
+    const summary = {
+      total_links: linksSummary.total_links,
+      total_clicks: clicksSummary.recorded_clicks || linksSummary.total_clicks,
+      unique_visitors: clicksSummary.unique_visitors || 0
+    };
 
     // Clicks by UTM Source
     const bySource = db.prepare(`
