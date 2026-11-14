@@ -9,6 +9,8 @@ services:
       - PORT=4000
       - BASE_DOMAIN=https://go.juditcatala.com
       - DATA_DIR=/app/backend/data
+      - ADMIN_PASSWORD=admin123 # Cambia esta contraseña por la tuya en Coolify
+      - AUTH_SECRET=omnya_secure_random_key_2026
     volumes:
       - shortener_data:/app/backend/data
     ports:

@@ -85,7 +85,10 @@ export const UtmShortenerStudio: React.FC = () => {
 
   // Load channels from server DB on mount so any computer/device sees the same channels
   useEffect(() => {
-    fetch('/api/channels')
+    const token = localStorage.getItem('omnya_shortener_token') || '';
+    fetch('/api/channels', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
       .then(res => res.json())
       .then(json => {
         if (json.data && json.data.length > 0) {
@@ -115,10 +118,14 @@ export const UtmShortenerStudio: React.FC = () => {
   };
 
   const saveChannelToServer = async (channel: ChannelPreset) => {
+    const token = localStorage.getItem('omnya_shortener_token') || '';
     try {
       await fetch('/api/channels', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(channel)
       });
     } catch (e) {
@@ -129,8 +136,12 @@ export const UtmShortenerStudio: React.FC = () => {
   const removeChannel = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setChannels(prev => prev.filter(c => c.id !== id));
+    const token = localStorage.getItem('omnya_shortener_token') || '';
     try {
-      await fetch(`/api/channels/${id}`, { method: 'DELETE' });
+      await fetch(`/api/channels/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
     } catch (err) {
       console.error(err);
     }
@@ -240,10 +251,14 @@ export const UtmShortenerStudio: React.FC = () => {
     });
 
     if (autoShorten) {
+      const token = localStorage.getItem('omnya_shortener_token') || '';
       try {
         const res = await fetch('/api/links/batch', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({ items: preparedItems, campaignName })
         });
         const data = await res.json();

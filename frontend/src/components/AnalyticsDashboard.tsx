@@ -31,8 +31,11 @@ export const AnalyticsDashboard: React.FC = () => {
   const fetchAnalytics = async () => {
     setLoading(true);
     setError('');
+    const token = localStorage.getItem('omnya_shortener_token') || '';
     try {
-      const res = await fetch('/api/analytics');
+      const res = await fetch('/api/analytics', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Error cargando métricas');
       setData(json);

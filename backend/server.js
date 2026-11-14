@@ -17,6 +17,8 @@ dotenv.config({ path: path.resolve(__dirname, '.env') });
 const app = express();
 const PORT = process.env.PORT || 4000;
 const BASE_DOMAIN = process.env.BASE_DOMAIN || `http://localhost:${PORT}`;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const AUTH_SECRET = process.env.AUTH_SECRET || (process.env.IP_SALT ? process.env.IP_SALT + '_jwt' : 'omnya_auth_token_key_2026');
 
 app.use(cors());
 app.use(express.json());
@@ -29,6 +31,61 @@ function hashIp(ip) {
   if (!ip) return 'anon';
   return crypto.createHash('sha256').update(ip + (process.env.IP_SALT || 'omnya_salt')).digest('hex').substring(0, 16);
 }
+
+// Generate simple HMAC token for authenticated sessions (lasts 30 days)
+function generateAuthToken() {
+  const expires = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  const signature = crypto.createHmac('sha256', AUTH_SECRET).update(String(expires)).digest('hex');
+  return `${expires}.${signature}`;
+}
+
+function verifyAuthToken(token) {
+  if (!token) return false;
+  const [expiresStr, signature] = token.split('.');
+  if (!expiresStr || !signature) return false;
+  const expires = parseInt(expiresStr, 10);
+  if (isNaN(expires) || Date.now() > expires) return false;
+  const expectedSig = crypto.createHmac('sha256', AUTH_SECRET).update(expiresStr).digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig));
+}
+
+// Middleware to protect API routes from unauthorized access
+function requireAuth(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!token || !verifyAuthToken(token)) {
+    return res.status(401).json({ error: 'Acceso no autorizado. Inicia sesión primero.' });
+  }
+  next();
+}
+
+// -------------------------------------------------------------
+// AUTH ENDPOINTS (Login & Session check)
+// -------------------------------------------------------------
+app.post('/api/auth/login', (req, res) => {
+  const { password } = req.body;
+  if (!password) {
+    return res.status(400).json({ error: 'Contraseña requerida' });
+  }
+
+  // Constant time comparison to prevent timing attacks
+  const inputBuffer = Buffer.from(password);
+  const targetBuffer = Buffer.from(ADMIN_PASSWORD);
+
+  if (inputBuffer.length !== targetBuffer.length || !crypto.timingSafeEqual(inputBuffer, targetBuffer)) {
+    return res.status(401).json({ error: 'Contraseña incorrecta' });
+  }
+
+  const token = generateAuthToken();
+  res.json({ success: true, token });
+});
+
+app.get('/api/auth/check', (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  res.json({ authenticated: Boolean(token && verifyAuthToken(token)) });
+});
 
 // -------------------------------------------------------------
 // 1. REDIRECTION ENGINE (Ultra-fast)
@@ -117,7 +174,7 @@ app.get('/health', (req, res) => {
 });
 
 // Create single or batch links
-app.post('/api/links/batch', (req, res) => {
+app.post('/api/links/batch', requireAuth, (req, res) => {
   try {
     const { items, campaignName } = req.body;
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -176,7 +233,7 @@ app.post('/api/links/batch', (req, res) => {
 });
 
 // List all links with stats
-app.get('/api/links', (req, res) => {
+app.get('/api/links', requireAuth, (req, res) => {
   try {
     const { campaign, search } = req.query;
     let query = 'SELECT * FROM links';
@@ -211,7 +268,7 @@ app.get('/api/links', (req, res) => {
 });
 
 // Delete a single link
-app.delete('/api/links/:id', (req, res) => {
+app.delete('/api/links/:id', requireAuth, (req, res) => {
   try {
     db.prepare('DELETE FROM links WHERE id = ?').run(req.params.id);
     res.json({ success: true });
@@ -221,7 +278,7 @@ app.delete('/api/links/:id', (req, res) => {
 });
 
 // Delete multiple links in bulk
-app.post('/api/links/delete-batch', (req, res) => {
+app.post('/api/links/delete-batch', requireAuth, (req, res) => {
   try {
     const { ids } = req.body;
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
@@ -239,7 +296,7 @@ app.post('/api/links/delete-batch', (req, res) => {
 // -------------------------------------------------------------
 // CHANNEL PRESETS API (Save & Sync across all devices)
 // -------------------------------------------------------------
-app.get('/api/channels', (req, res) => {
+app.get('/api/channels', requireAuth, (req, res) => {
   try {
     const channels = db.prepare('SELECT * FROM channel_presets ORDER BY rowid ASC').all();
     const formatted = channels.map(c => ({
@@ -259,7 +316,7 @@ app.get('/api/channels', (req, res) => {
   }
 });
 
-app.post('/api/channels', (req, res) => {
+app.post('/api/channels', requireAuth, (req, res) => {
   try {
     const { id, name, category, source, medium, enabled, count, customItems, variationType } = req.body;
     if (!id || !name || !source || !medium) {
@@ -296,7 +353,7 @@ app.post('/api/channels', (req, res) => {
   }
 });
 
-app.delete('/api/channels/:id', (req, res) => {
+app.delete('/api/channels/:id', requireAuth, (req, res) => {
   try {
     db.prepare('DELETE FROM channel_presets WHERE id = ?').run(req.params.id);
     res.json({ success: true });
@@ -308,7 +365,7 @@ app.delete('/api/channels/:id', (req, res) => {
 // -------------------------------------------------------------
 // 3. ANALYTICS API (Comprehensive dashboard metrics)
 // -------------------------------------------------------------
-app.get('/api/analytics', (req, res) => {
+app.get('/api/analytics', requireAuth, (req, res) => {
   try {
     const { linkId, campaign } = req.query;
 

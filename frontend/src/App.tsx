@@ -1,11 +1,49 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { UtmShortenerStudio } from './components/UtmShortenerStudio.tsx';
 import { LinkManager } from './components/LinkManager.tsx';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard.tsx';
-import { Link2, Scissors, BarChart3 } from 'lucide-react';
+import { LoginScreen } from './components/LoginScreen.tsx';
+import { Link2, Scissors, BarChart3, LogOut, ShieldCheck } from 'lucide-react';
 
 export default function App() {
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem('omnya_shortener_token'));
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [activeTab, setActiveTab] = useState<'create' | 'links' | 'analytics'>('create');
+
+  useEffect(() => {
+    if (token) {
+      fetch('/api/auth/check', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (!data.authenticated) {
+            handleLogout();
+          }
+        })
+        .catch(() => handleLogout())
+        .finally(() => setCheckingAuth(false));
+    } else {
+      setCheckingAuth(false);
+    }
+  }, [token]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('omnya_shortener_token');
+    setToken(null);
+  };
+
+  if (checkingAuth) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0b0f19', color: 'var(--text-muted)' }}>
+        Verificando sesión...
+      </div>
+    );
+  }
+
+  if (!token) {
+    return <LoginScreen onLoginSuccess={(newToken) => setToken(newToken)} />;
+  }
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -99,6 +137,34 @@ export default function App() {
             <span>Analítica</span>
           </button>
         </nav>
+
+        {/* User / Logout */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', color: 'var(--success)' }}>
+            <ShieldCheck size={16} />
+            <span>Admin</span>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            title="Cerrar Sesión"
+            style={{
+              background: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              color: 'var(--error)',
+              padding: '6px 12px',
+              borderRadius: '6px',
+              fontSize: '0.8rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer'
+            }}
+          >
+            <LogOut size={14} />
+            <span>Salir</span>
+          </button>
+        </div>
       </header>
 
       {/* Main Container */}

@@ -36,8 +36,11 @@ export const LinkManager: React.FC = () => {
 
   const fetchLinks = async () => {
     setLoading(true);
+    const token = localStorage.getItem('omnya_shortener_token') || '';
     try {
-      const res = await fetch('/api/links');
+      const res = await fetch('/api/links', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const json = await res.json();
       if (json.data) setLinks(json.data);
     } catch (e) {
@@ -59,8 +62,12 @@ export const LinkManager: React.FC = () => {
 
   const handleDelete = async (id: number) => {
     if (!window.confirm('¿Seguro que deseas eliminar este enlace acortado?')) return;
+    const token = localStorage.getItem('omnya_shortener_token') || '';
     try {
-      await fetch(`/api/links/${id}`, { method: 'DELETE' });
+      await fetch(`/api/links/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       setLinks(prev => prev.filter(l => l.id !== id));
       setSelectedIds(prev => prev.filter(i => i !== id));
     } catch (e) {
@@ -73,10 +80,14 @@ export const LinkManager: React.FC = () => {
     if (!window.confirm(`¿Seguro que deseas eliminar los ${selectedIds.length} enlaces seleccionados? Esta acción no se puede deshacer.`)) return;
 
     setIsDeleting(true);
+    const token = localStorage.getItem('omnya_shortener_token') || '';
     try {
       const res = await fetch('/api/links/delete-batch', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ ids: selectedIds })
       });
       const data = await res.json();
