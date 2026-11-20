@@ -168,6 +168,112 @@ function handleRedirect(req, res, slug) {
 // 2. API ENDPOINTS
 // -------------------------------------------------------------
 
+// Lightweight Tracking Script (for landing pages like app.juditcatala.com)
+app.get('/track.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(`
+(function() {
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var source = params.get('utm_source');
+    var medium = params.get('utm_medium');
+    var campaign = params.get('utm_campaign');
+    var content = params.get('utm_content');
+    var term = params.get('utm_term');
+    var fbclid = params.get('fbclid');
+
+    // Only track if there are UTMs or ad click IDs
+    if (source || medium || campaign || fbclid) {
+      var data = {
+        utm_source: source,
+        utm_medium: medium,
+        utm_campaign: campaign,
+        utm_content: content,
+        utm_term: term,
+        fbclid: fbclid,
+        referrer: document.referrer || '',
+        url: window.location.href
+      };
+
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('${BASE_DOMAIN}/api/track', JSON.stringify(data));
+      } else {
+        fetch('${BASE_DOMAIN}/api/track', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+          keepalive: true
+        }).catch(function() {});
+      }
+      console.log('[Omnya Tracker] Visita registrada:', source, medium);
+    }
+  } catch (e) {
+    console.error('[Omnya Tracker Error]', e);
+  }
+})();
+  `);
+});
+
+// Endpoint that receives landing page pageviews/clicks from track.js
+app.post('/api/track', (req, res) => {
+  try {
+    const data = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    
+    setImmediate(() => {
+      try {
+        const ua = req.headers['user-agent'] || '';
+        const parser = new UAParser(ua);
+        const parsed = parser.getResult();
+        const deviceType = parsed.device.type || (ua.toLowerCase().includes('mobile') ? 'mobile' : 'desktop');
+        const browser = parsed.browser.name || 'Desconocido';
+        const os = parsed.os.name || 'Desconocido';
+
+        const rawIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || '';
+        const ipHashed = hashIp(rawIp);
+        const geo = geoip.lookup(rawIp);
+        const country = geo ? geo.country : 'Desconocido';
+        const city = geo ? geo.city : 'Desconocido';
+
+        const source = data.utm_source ? data.utm_source.toLowerCase().trim() : 'directo';
+        const medium = data.utm_medium ? data.utm_medium.toLowerCase().trim() : 'ninguno';
+        const campaign = data.utm_campaign ? data.utm_campaign.toLowerCase().trim() : null;
+        const content = data.utm_content ? data.utm_content.toLowerCase().trim() : null;
+        const term = data.utm_term ? data.utm_term.toLowerCase().trim() : null;
+        const referer = data.referrer || req.headers['referer'] || 'Directo / Ads';
+
+        db.prepare(`
+          INSERT INTO clicks (
+            link_id, slug, utm_source, utm_medium, utm_campaign, utm_content, utm_term,
+            ip_hash, country, city, device_type, browser, os, referer
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          null,
+          'landing_tracker',
+          source,
+          medium,
+          campaign,
+          content,
+          term,
+          ipHashed,
+          country,
+          city,
+          deviceType,
+          browser,
+          os,
+          referer
+        );
+      } catch (e) {
+        console.error('[Track View Error]', e);
+      }
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Healthcheck for Coolify
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
@@ -622,13 +728,13 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       LIMIT 20
     `).all(campaign ? [campaign] : []);
 
-    // Clicks by UTM Source
+    // Clicks by UTM Source (including both shortener links and landing tracker)
     const bySource = db.prepare(`
       SELECT 
-        COALESCE(l.utm_source, 'directo') as source, 
+        COALESCE(COALESCE(c.utm_source, l.utm_source), 'directo') as source, 
         COUNT(c.id) as clicks
       FROM clicks c
-      JOIN links l ON c.link_id = l.id
+      LEFT JOIN links l ON c.link_id = l.id
       ${linkFilter}
       GROUP BY source
       ORDER BY clicks DESC
@@ -638,10 +744,10 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     // Clicks by UTM Medium
     const byMedium = db.prepare(`
       SELECT 
-        COALESCE(l.utm_medium, 'ninguno') as medium, 
+        COALESCE(COALESCE(c.utm_medium, l.utm_medium), 'ninguno') as medium, 
         COUNT(c.id) as clicks
       FROM clicks c
-      JOIN links l ON c.link_id = l.id
+      LEFT JOIN links l ON c.link_id = l.id
       ${linkFilter}
       GROUP BY medium
       ORDER BY clicks DESC
@@ -651,13 +757,13 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     // Clicks by UTM Content (Which specific message or ad won)
     const byContent = db.prepare(`
       SELECT 
-        COALESCE(l.utm_content, 'sin_contenido') as content,
-        l.channel_name,
+        COALESCE(COALESCE(c.utm_content, l.utm_content), 'sin_contenido') as content,
+        COALESCE(l.channel_name, 'Landing Directo') as channel_name,
         COUNT(c.id) as clicks
       FROM clicks c
-      JOIN links l ON c.link_id = l.id
+      LEFT JOIN links l ON c.link_id = l.id
       ${linkFilter}
-      GROUP BY content, l.channel_name
+      GROUP BY content, channel_name
       ORDER BY clicks DESC
       LIMIT 15
     `).all(...params);

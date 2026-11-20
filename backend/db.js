@@ -43,8 +43,13 @@ export function initDb() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS clicks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      link_id INTEGER NOT NULL,
-      slug TEXT NOT NULL,
+      link_id INTEGER,
+      slug TEXT,
+      utm_source TEXT,
+      utm_medium TEXT,
+      utm_campaign TEXT,
+      utm_content TEXT,
+      utm_term TEXT,
       timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
       ip_hash TEXT,
       country TEXT,
@@ -57,6 +62,7 @@ export function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_clicks_link_id ON clicks(link_id);
     CREATE INDEX IF NOT EXISTS idx_clicks_timestamp ON clicks(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_clicks_utm_source ON clicks(utm_source);
   `);
 
   // Table for form conversions / leads webhook
@@ -132,6 +138,22 @@ export function initDb() {
       for (const r of rows) insertPreset.run(...r);
     });
     insertTx(defaults);
+  }
+
+  // Gracefully migrate clicks table if columns don't exist
+  const clickCols = db.prepare("PRAGMA table_info(clicks)").all().map(c => c.name);
+  if (!clickCols.includes('utm_source')) {
+    try {
+      db.exec(`
+        ALTER TABLE clicks ADD COLUMN utm_source TEXT;
+        ALTER TABLE clicks ADD COLUMN utm_medium TEXT;
+        ALTER TABLE clicks ADD COLUMN utm_campaign TEXT;
+        ALTER TABLE clicks ADD COLUMN utm_content TEXT;
+        ALTER TABLE clicks ADD COLUMN utm_term TEXT;
+      `);
+    } catch (e) {
+      // Columns may already exist
+    }
   }
 
   console.log(`[DB] SQLite database initialized at ${dbPath}`);
