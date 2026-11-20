@@ -173,6 +173,78 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
+// WEBHOOK for Conversions (from n8n, Webhook or Form)
+app.post('/api/webhook/conversion', (req, res) => {
+  try {
+    const payload = req.body || {};
+
+    // Extract UTMs directly or fallback to parsing the "pagina" URL
+    let source = payload.utm_source;
+    let medium = payload.utm_medium;
+    let campaign = payload.utm_campaign;
+    let content = payload.utm_content;
+    let term = payload.utm_term;
+
+    if (payload.pagina) {
+      try {
+        const u = new URL(payload.pagina);
+        if (!source) source = u.searchParams.get('utm_source');
+        if (!medium) medium = u.searchParams.get('utm_medium');
+        if (!campaign) campaign = u.searchParams.get('utm_campaign');
+        if (!content) content = u.searchParams.get('utm_content');
+        if (!term) term = u.searchParams.get('utm_term');
+      } catch (err) {
+        // Not a standard URL, continue with payload values
+      }
+    }
+
+    const email = payload.email ? payload.email.trim().toLowerCase() : null;
+    const nombre = payload.nombre ? payload.nombre.trim() : null;
+    const evento = payload.evento || null;
+    const lista = payload.lista || null;
+    const variante = payload.variante || null;
+    const pagina = payload.pagina || null;
+    const referrer = payload.referrer || null;
+    const fbclid = payload.fbclid || null;
+    const zona_horaria = payload.zona_horaria || null;
+    const posible_bot = payload.posible_bot ? 1 : 0;
+    const fecha = payload.fecha ? new Date(payload.fecha).toISOString() : new Date().toISOString();
+
+    const stmt = db.prepare(`
+      INSERT INTO conversions (
+        email, nombre, evento, lista, variante, pagina, referrer,
+        utm_source, utm_medium, utm_campaign, utm_content, utm_term,
+        fbclid, zona_horaria, posible_bot, timestamp, raw_payload
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      email,
+      nombre,
+      evento,
+      lista,
+      variante,
+      pagina,
+      referrer,
+      source ? source.toLowerCase().trim() : null,
+      medium ? medium.toLowerCase().trim() : null,
+      campaign ? campaign.toLowerCase().trim() : null,
+      content ? content.toLowerCase().trim() : null,
+      term ? term.toLowerCase().trim() : null,
+      fbclid,
+      zona_horaria,
+      posible_bot,
+      fecha,
+      JSON.stringify(payload)
+    );
+
+    res.json({ success: true, message: 'Conversión registrada con éxito' });
+  } catch (err) {
+    console.error('[Conversion Webhook Error]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Create single or batch links
 app.post('/api/links/batch', requireAuth, (req, res) => {
   try {
@@ -399,11 +471,73 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       ${clicksFilter}
     `).get(...params);
 
+    // 3. Conversions summary (total leads, unique leads)
+    const convFilter = campaign ? 'WHERE utm_campaign = ?' : '';
+    const convSummary = db.prepare(`
+      SELECT 
+        COUNT(*) as total_conversions,
+        COUNT(DISTINCT email) as unique_leads
+      FROM conversions
+      ${convFilter}
+    `).get(campaign ? [campaign] : []);
+
+    const totalClicksNum = clicksSummary.recorded_clicks || linksSummary.total_clicks || 0;
+    const totalConvNum = convSummary?.total_conversions || 0;
+    const convRate = totalClicksNum > 0 ? Number(((totalConvNum / totalClicksNum) * 100).toFixed(2)) : 0;
+
     const summary = {
       total_links: linksSummary.total_links,
-      total_clicks: clicksSummary.recorded_clicks || linksSummary.total_clicks,
-      unique_visitors: clicksSummary.unique_visitors || 0
+      total_clicks: totalClicksNum,
+      unique_visitors: clicksSummary.unique_visitors || 0,
+      total_conversions: totalConvNum,
+      unique_leads: convSummary?.unique_leads || 0,
+      conversion_rate: convRate
     };
+
+    // Conversions by UTM Source (and comparison with clicks)
+    const convBySource = db.prepare(`
+      SELECT 
+        COALESCE(utm_source, 'directo') as source,
+        COUNT(*) as conversions,
+        COUNT(DISTINCT email) as unique_leads
+      FROM conversions
+      ${convFilter}
+      GROUP BY source
+      ORDER BY conversions DESC
+    `).all(campaign ? [campaign] : []);
+
+    // Conversions by UTM Medium
+    const convByMedium = db.prepare(`
+      SELECT 
+        COALESCE(utm_medium, 'ninguno') as medium,
+        COUNT(*) as conversions,
+        COUNT(DISTINCT email) as unique_leads
+      FROM conversions
+      ${convFilter}
+      GROUP BY medium
+      ORDER BY conversions DESC
+    `).all(campaign ? [campaign] : []);
+
+    // Conversions by UTM Content (Which specific message converted)
+    const convByContent = db.prepare(`
+      SELECT 
+        COALESCE(utm_content, 'sin_contenido') as content,
+        COUNT(*) as conversions,
+        COUNT(DISTINCT email) as unique_leads
+      FROM conversions
+      ${convFilter}
+      GROUP BY content
+      ORDER BY conversions DESC
+    `).all(campaign ? [campaign] : []);
+
+    // Recent 20 leads
+    const recentLeads = db.prepare(`
+      SELECT id, nombre, email, evento, utm_source, utm_medium, utm_campaign, utm_content, timestamp
+      FROM conversions
+      ${convFilter}
+      ORDER BY id DESC
+      LIMIT 20
+    `).all(campaign ? [campaign] : []);
 
     // Clicks by UTM Source
     const bySource = db.prepare(`
@@ -492,7 +626,11 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       byContent,
       byCountry,
       byDevice,
-      timeline
+      timeline,
+      convBySource,
+      convByMedium,
+      convByContent,
+      recentLeads
     });
   } catch (error) {
     console.error('[Analytics API]', error);

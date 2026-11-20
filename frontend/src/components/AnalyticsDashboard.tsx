@@ -6,7 +6,12 @@ import {
   MousePointerClick,
   TrendingUp,
   RefreshCw,
-  Layers
+  Layers,
+  UserCheck,
+  Percent,
+  Webhook,
+  Copy,
+  Check
 } from 'lucide-react';
 
 interface AnalyticsData {
@@ -14,6 +19,9 @@ interface AnalyticsData {
     total_links: number;
     total_clicks: number;
     unique_visitors: number;
+    total_conversions: number;
+    unique_leads: number;
+    conversion_rate: number;
   };
   bySource: { source: string; clicks: number }[];
   byMedium: { medium: string; clicks: number }[];
@@ -21,12 +29,30 @@ interface AnalyticsData {
   byCountry: { country: string; clicks: number }[];
   byDevice: { device_type: string; clicks: number }[];
   timeline: { date: string; clicks: number; unique_clicks: number }[];
+  convBySource: { source: string; conversions: number; unique_leads: number }[];
+  convByMedium: { medium: string; conversions: number; unique_leads: number }[];
+  convByContent: { content: string; conversions: number; unique_leads: number }[];
+  recentLeads: {
+    id: number;
+    nombre: string;
+    email: string;
+    evento: string;
+    utm_source: string;
+    utm_medium: string;
+    utm_campaign: string;
+    utm_content: string;
+    timestamp: string;
+  }[];
 }
 
 export const AnalyticsDashboard: React.FC = () => {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+  const [showWebhookGuide, setShowWebhookGuide] = useState(false);
+
+  const webhookUrl = `${window.location.origin}/api/webhook/conversion`;
 
   const fetchAnalytics = async () => {
     setLoading(true);
@@ -50,7 +76,57 @@ export const AnalyticsDashboard: React.FC = () => {
     fetchAnalytics();
   }, []);
 
-  const totalClicks = data?.summary.total_clicks || 0;
+  const handleCopyWebhook = () => {
+    navigator.clipboard.writeText(webhookUrl);
+    setCopiedWebhook(true);
+    setTimeout(() => setCopiedWebhook(false), 2000);
+  };
+
+  // Build combined source list (clicks + conversions + conversion rate)
+  const allSources = Array.from(new Set([
+    ...(data?.bySource?.map(s => s.source) || []),
+    ...(data?.convBySource?.map(c => c.source) || [])
+  ]));
+
+  const sourceComparison = allSources.map(src => {
+    const clickObj = data?.bySource?.find(s => s.source.toLowerCase() === src.toLowerCase());
+    const convObj = data?.convBySource?.find(c => c.source.toLowerCase() === src.toLowerCase());
+    const clicks = clickObj ? clickObj.clicks : 0;
+    const convs = convObj ? convObj.conversions : 0;
+    const rate = clicks > 0 ? Number(((convs / clicks) * 100).toFixed(1)) : (convs > 0 ? 100 : 0);
+    return { source: src, clicks, convs, rate };
+  }).sort((a, b) => b.convs - a.convs || b.clicks - a.clicks);
+
+  // Build combined medium list
+  const allMediums = Array.from(new Set([
+    ...(data?.byMedium?.map(m => m.medium) || []),
+    ...(data?.convByMedium?.map(c => c.medium) || [])
+  ]));
+
+  const mediumComparison = allMediums.map(med => {
+    const clickObj = data?.byMedium?.find(m => m.medium.toLowerCase() === med.toLowerCase());
+    const convObj = data?.convByMedium?.find(c => c.medium.toLowerCase() === med.toLowerCase());
+    const clicks = clickObj ? clickObj.clicks : 0;
+    const convs = convObj ? convObj.conversions : 0;
+    const rate = clicks > 0 ? Number(((convs / clicks) * 100).toFixed(1)) : (convs > 0 ? 100 : 0);
+    return { medium: med, clicks, convs, rate };
+  }).sort((a, b) => b.convs - a.convs || b.clicks - a.clicks);
+
+  // Build combined content / message list
+  const allContents = Array.from(new Set([
+    ...(data?.byContent?.map(c => c.content) || []),
+    ...(data?.convByContent?.map(c => c.content) || [])
+  ]));
+
+  const contentComparison = allContents.map(con => {
+    const clickObj = data?.byContent?.find(c => c.content.toLowerCase() === con.toLowerCase());
+    const convObj = data?.convByContent?.find(c => c.content.toLowerCase() === con.toLowerCase());
+    const clicks = clickObj ? clickObj.clicks : 0;
+    const convs = convObj ? convObj.conversions : 0;
+    const channel = clickObj?.channel_name || '';
+    const rate = clicks > 0 ? Number(((convs / clicks) * 100).toFixed(1)) : (convs > 0 ? 100 : 0);
+    return { content: con, channel, clicks, convs, rate };
+  }).sort((a, b) => b.convs - a.convs || b.clicks - a.clicks);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
@@ -59,33 +135,94 @@ export const AnalyticsDashboard: React.FC = () => {
         <div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
             <BarChart3 size={24} color="var(--secondary)" />
-            <span>Panel de Analítica y Rendimiento</span>
+            <span>Panel de Analítica: Clics vs Registros Reales</span>
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '4px 0 0 0' }}>
-            Métricas de clics en tiempo real desglosadas por canal, mensaje y ubicación geográfica.
+            Compara el rendimiento de tus enlaces UTM con las conversiones que llegan desde n8n en tiempo real.
           </p>
         </div>
 
-        <button
-          onClick={fetchAnalytics}
-          disabled={loading}
-          style={{
-            background: 'rgba(255, 255, 255, 0.08)',
-            border: '1px solid var(--border-color)',
-            color: '#fff',
-            padding: '8px 16px',
-            borderRadius: '8px',
-            fontSize: '0.85rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            cursor: 'pointer'
-          }}
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          <span>Actualizar Datos</span>
-        </button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <button
+            onClick={() => setShowWebhookGuide(!showWebhookGuide)}
+            style={{
+              background: 'rgba(6, 182, 212, 0.15)',
+              border: '1px solid var(--secondary)',
+              color: 'var(--secondary)',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              fontSize: '0.85rem',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer'
+            }}
+          >
+            <Webhook size={14} />
+            <span>Webhook n8n</span>
+          </button>
+
+          <button
+            onClick={fetchAnalytics}
+            disabled={loading}
+            style={{
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid var(--border-color)',
+              color: '#fff',
+              padding: '8px 16px',
+              borderRadius: '8px',
+              fontSize: '0.85rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              cursor: 'pointer'
+            }}
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <span>Actualizar</span>
+          </button>
+        </div>
       </div>
+
+      {/* Webhook Guide Drawer */}
+      {showWebhookGuide && (
+        <div className="glass-card" style={{ padding: '20px 24px', background: 'rgba(15, 23, 42, 0.95)', border: '1px solid var(--secondary)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <h4 style={{ margin: 0, color: '#fff', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Webhook size={16} color="var(--secondary)" />
+              <span>Conectar n8n con tu Shortener (Recepción de Registros)</span>
+            </h4>
+            <span style={{ fontSize: '0.75rem', color: 'var(--success)' }}>● Endpoint Activo</span>
+          </div>
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '0 0 12px 0' }}>
+            En tu flujo de n8n, agrega un nodo <strong>HTTP Request</strong> justo después de que alguien llena el formulario para enviar el JSON a esta URL:
+          </p>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <code style={{ flex: 1, padding: '10px 14px', background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--secondary-hover)', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+              POST {webhookUrl}
+            </code>
+            <button
+              onClick={handleCopyWebhook}
+              style={{
+                background: copiedWebhook ? 'var(--success)' : 'rgba(255,255,255,0.08)',
+                border: '1px solid var(--border-color)',
+                color: '#fff',
+                padding: '10px 14px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '0.8rem'
+              }}
+            >
+              {copiedWebhook ? <Check size={14} /> : <Copy size={14} />}
+              <span>{copiedWebhook ? 'Copiado' : 'Copiar URL'}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div style={{ padding: '12px 18px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--error)', borderRadius: '8px', color: 'var(--error)', fontSize: '0.9rem' }}>
@@ -93,174 +230,267 @@ export const AnalyticsDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px' }}>
-        <div className="glass-card" style={{ padding: '22px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Clics Totales</span>
-            <MousePointerClick size={20} color="var(--primary-hover)" />
+      {/* 4 Main KPI Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+        <div className="glass-card" style={{ padding: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Clics Totales</span>
+            <MousePointerClick size={18} color="var(--primary-hover)" />
           </div>
-          <div style={{ fontSize: '2rem', fontWeight: 700, color: '#fff' }}>
+          <div style={{ fontSize: '1.9rem', fontWeight: 700, color: '#fff' }}>
             {data?.summary.total_clicks ?? 0}
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Redirecciones registradas
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+            {data?.summary.unique_visitors ?? 0} visitantes únicos
           </div>
         </div>
 
-        <div className="glass-card" style={{ padding: '22px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Visitantes Únicos</span>
-            <TrendingUp size={20} color="var(--secondary)" />
+        <div className="glass-card" style={{ padding: '20px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--success)' }}>Registros Reales (Leads)</span>
+            <UserCheck size={18} color="var(--success)" />
           </div>
-          <div style={{ fontSize: '2rem', fontWeight: 700, color: '#fff' }}>
-            {data?.summary.unique_visitors ?? 0}
+          <div style={{ fontSize: '1.9rem', fontWeight: 700, color: '#fff' }}>
+            {data?.summary.total_conversions ?? 0}
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Dispositivos / IPs únicas
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+            {data?.summary.unique_leads ?? 0} correos únicos recibidos
           </div>
         </div>
 
-        <div className="glass-card" style={{ padding: '22px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Enlaces Creados</span>
-            <Layers size={20} color="var(--accent)" />
+        <div className="glass-card" style={{ padding: '20px', background: 'rgba(6, 182, 212, 0.08)', border: '1px solid rgba(6, 182, 212, 0.3)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--secondary)' }}>Tasa de Conversión</span>
+            <Percent size={18} color="var(--secondary)" />
           </div>
-          <div style={{ fontSize: '2rem', fontWeight: 700, color: '#fff' }}>
+          <div style={{ fontSize: '1.9rem', fontWeight: 700, color: '#fff' }}>
+            {data?.summary.conversion_rate ?? 0}%
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+            De cada 100 clics, se registran {(data?.summary.conversion_rate ?? 0)}
+          </div>
+        </div>
+
+        <div className="glass-card" style={{ padding: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Enlaces Activos</span>
+            <Layers size={18} color="var(--accent)" />
+          </div>
+          <div style={{ fontSize: '1.9rem', fontWeight: 700, color: '#fff' }}>
             {data?.summary.total_links ?? 0}
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-            UTMs acortadas activas
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+            UTMs rastreadas en el sistema
           </div>
         </div>
       </div>
 
-      {/* Detailed Breakdown Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
-        {/* Clicks by Source */}
+      {/* Comparisons Section: Clics vs Registros por Canal & Medio */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '20px' }}>
+        {/* Canales (utm_source) */}
         <div className="glass-card" style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Globe size={18} color="var(--secondary)" />
-            <span>Rendimiento por Canal (utm_source)</span>
+            <span>Conversión por Canal (utm_source)</span>
           </h3>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {data?.bySource && data.bySource.length > 0 ? (
-              data.bySource.map(item => {
-                const pct = totalClicks > 0 ? Math.round((item.clicks / totalClicks) * 100) : 0;
-                return (
-                  <div key={item.source}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{item.source}</span>
-                      <span style={{ color: 'var(--text-muted)' }}>{item.clicks} clics ({pct}%)</span>
-                    </div>
-                    <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg, var(--primary), var(--secondary))' }} />
-                    </div>
+          {sourceComparison.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px 0' }}>
+              Aún no hay clics ni registros registrados.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {sourceComparison.map(item => (
+                <div key={item.source} style={{ background: 'rgba(0,0,0,0.2)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.88rem' }}>{item.source}</span>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--success)', fontWeight: 600, background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
+                      {item.rate}% conv.
+                    </span>
                   </div>
-                );
-              })
-            ) : (
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px 0' }}>
-                Sin datos de clics aún.
-              </div>
-            )}
-          </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
+                    <span>{item.clicks} clics</span>
+                    <strong style={{ color: 'var(--success)' }}>{item.convs} registros reales</strong>
+                  </div>
+                  <div style={{ width: '100%', height: '5px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, item.rate)}%`, height: '100%', background: 'linear-gradient(90deg, var(--secondary), var(--success))' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Clicks by Content (Messages) */}
+        {/* Medios (utm_medium) */}
         <div className="glass-card" style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <TrendingUp size={18} color="var(--accent)" />
-            <span>Mensajes / Creativos Ganadores (utm_content)</span>
+            <TrendingUp size={18} color="var(--primary-hover)" />
+            <span>Conversión por Medio (utm_medium)</span>
           </h3>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {data?.byContent && data.byContent.length > 0 ? (
-              data.byContent.map((item, idx) => {
-                const pct = totalClicks > 0 ? Math.round((item.clicks / totalClicks) * 100) : 0;
-                return (
-                  <div key={idx}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {item.content} <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>({item.channel_name})</span>
+          {mediumComparison.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px 0' }}>
+              Sin datos de medios registrados aún.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {mediumComparison.map(item => (
+                <div key={item.medium} style={{ background: 'rgba(0,0,0,0.2)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.88rem' }}>{item.medium}</span>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--success)', fontWeight: 600, background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
+                      {item.rate}% conv.
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
+                    <span>{item.clicks} clics</span>
+                    <strong style={{ color: 'var(--success)' }}>{item.convs} registros reales</strong>
+                  </div>
+                  <div style={{ width: '100%', height: '5px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, item.rate)}%`, height: '100%', background: 'linear-gradient(90deg, var(--primary), var(--success))' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Mensajes Ganadores (utm_content) */}
+      <div className="glass-card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <h3 style={{ fontSize: '1.05rem', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <TrendingUp size={18} color="var(--accent)" />
+          <span>Efectividad de Mensajes y Creativos (utm_content)</span>
+        </h3>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>
+          Descubre cuál mensaje exacto de WhatsApp, email o anuncio trajo la mayor cantidad de registros reales.
+        </p>
+
+        {contentComparison.length === 0 ? (
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px 0' }}>
+            Sin datos de contenido aún.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                  <th style={{ padding: '10px 12px' }}>MENSAJE / CREATIVO (utm_content)</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center' }}>CLICS</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center' }}>REGISTROS REALES</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center' }}>TASA DE CONVERSIÓN</th>
+                </tr>
+              </thead>
+              <tbody>
+                {contentComparison.map((item, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                    <td style={{ padding: '12px 12px', fontWeight: 600, color: '#fff' }}>
+                      <span style={{ background: 'rgba(236,72,153,0.15)', color: 'var(--accent)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.78rem', marginRight: '8px' }}>
+                        {item.content}
                       </span>
-                      <span style={{ color: 'var(--text-muted)' }}>{item.clicks} clics</span>
-                    </div>
-                    <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent)' }} />
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px 0' }}>
-                Sin datos de contenido aún.
-              </div>
-            )}
+                      {item.channel && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>({item.channel})</span>}
+                    </td>
+                    <td style={{ padding: '12px 12px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                      {item.clicks}
+                    </td>
+                    <td style={{ padding: '12px 12px', textAlign: 'center', color: 'var(--success)', fontWeight: 700 }}>
+                      {item.convs}
+                    </td>
+                    <td style={{ padding: '12px 12px', textAlign: 'center' }}>
+                      <span style={{
+                        background: item.rate > 20 ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.05)',
+                        color: item.rate > 20 ? 'var(--success)' : 'var(--text-muted)',
+                        padding: '3px 8px',
+                        borderRadius: '10px',
+                        fontSize: '0.75rem',
+                        fontWeight: 700
+                      }}>
+                        {item.rate}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
+        )}
+      </div>
 
-        {/* Devices */}
-        <div className="glass-card" style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Smartphone size={18} color="var(--primary-hover)" />
-            <span>Dispositivos</span>
+      {/* Recent Leads Table */}
+      {data?.recentLeads && data.recentLeads.length > 0 && (
+        <div className="glass-card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <h3 style={{ fontSize: '1.05rem', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <UserCheck size={18} color="var(--success)" />
+            <span>Últimos Registros Recibidos desde el Formulario (En Vivo)</span>
           </h3>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {data?.byDevice && data.byDevice.length > 0 ? (
-              data.byDevice.map(item => {
-                const pct = totalClicks > 0 ? Math.round((item.clicks / totalClicks) * 100) : 0;
-                return (
-                  <div key={item.device_type}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{item.device_type}</span>
-                      <span style={{ color: 'var(--text-muted)' }}>{item.clicks} ({pct}%)</span>
-                    </div>
-                    <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div style={{ width: `${pct}%`, height: '100%', background: 'var(--primary)' }} />
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px 0' }}>
-                Sin datos de dispositivos aún.
-              </div>
-            )}
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                  <th style={{ padding: '10px 12px' }}>NOMBRE</th>
+                  <th style={{ padding: '10px 12px' }}>EMAIL</th>
+                  <th style={{ padding: '10px 12px' }}>CANAL / MEDIO</th>
+                  <th style={{ padding: '10px 12px' }}>MENSAJE (utm_content)</th>
+                  <th style={{ padding: '10px 12px' }}>EVENTO</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>FECHA</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.recentLeads.map(lead => (
+                  <tr key={lead.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                    <td style={{ padding: '10px 12px', fontWeight: 600, color: '#fff' }}>{lead.nombre || 'Anónimo'}</td>
+                    <td style={{ padding: '10px 12px', color: 'var(--secondary-hover)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{lead.email}</td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                        {lead.utm_source || 'directo'} / {lead.utm_medium || '-'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      {lead.utm_content ? (
+                        <span style={{ background: 'rgba(236,72,153,0.15)', color: 'var(--accent)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem' }}>
+                          {lead.utm_content}
+                        </span>
+                      ) : '-'}
+                    </td>
+                    <td style={{ padding: '10px 12px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>{lead.evento || '-'}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {new Date(lead.timestamp).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
+      )}
 
-        {/* Countries */}
-        <div className="glass-card" style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Globe size={18} color="var(--secondary)" />
-            <span>Países Principales</span>
-          </h3>
+      {/* Devices & Countries footer info */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+        <div className="glass-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Smartphone size={16} color="var(--primary-hover)" />
+            <span>Dispositivos de los Clics</span>
+          </h4>
+          {data?.byDevice?.map(item => (
+            <div key={item.device_type} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>{item.device_type}</span>
+              <span style={{ fontWeight: 600, color: '#fff' }}>{item.clicks} clics</span>
+            </div>
+          ))}
+        </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {data?.byCountry && data.byCountry.length > 0 ? (
-              data.byCountry.map(item => {
-                const pct = totalClicks > 0 ? Math.round((item.clicks / totalClicks) * 100) : 0;
-                return (
-                  <div key={item.country}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{item.country}</span>
-                      <span style={{ color: 'var(--text-muted)' }}>{item.clicks} ({pct}%)</span>
-                    </div>
-                    <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div style={{ width: `${pct}%`, height: '100%', background: 'var(--secondary)' }} />
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px 0' }}>
-                Sin datos de países aún.
-              </div>
-            )}
-          </div>
+        <div className="glass-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Globe size={16} color="var(--secondary)" />
+            <span>Países Principales de los Clics</span>
+          </h4>
+          {data?.byCountry?.map(item => (
+            <div key={item.country} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>{item.country}</span>
+              <span style={{ fontWeight: 600, color: '#fff' }}>{item.clicks} clics</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>

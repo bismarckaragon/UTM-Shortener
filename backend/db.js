@@ -59,6 +59,35 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_clicks_timestamp ON clicks(timestamp);
   `);
 
+  // Table for form conversions / leads webhook
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS conversions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT,
+      nombre TEXT,
+      evento TEXT,
+      lista TEXT,
+      variante TEXT,
+      pagina TEXT,
+      referrer TEXT,
+      utm_source TEXT,
+      utm_medium TEXT,
+      utm_campaign TEXT,
+      utm_content TEXT,
+      utm_term TEXT,
+      fbclid TEXT,
+      zona_horaria TEXT,
+      posible_bot INTEGER DEFAULT 0,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      raw_payload TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversions_campaign ON conversions(utm_campaign);
+    CREATE INDEX IF NOT EXISTS idx_conversions_source ON conversions(utm_source);
+    CREATE INDEX IF NOT EXISTS idx_conversions_medium ON conversions(utm_medium);
+    CREATE INDEX IF NOT EXISTS idx_conversions_content ON conversions(utm_content);
+    CREATE INDEX IF NOT EXISTS idx_conversions_timestamp ON conversions(timestamp);
+  `);
+
   // Table for channel presets (so channels persist on the server for any user/device)
   db.exec(`
     CREATE TABLE IF NOT EXISTS channel_presets (
