@@ -242,13 +242,30 @@ app.post('/api/track', (req, res) => {
         const term = data.utm_term ? data.utm_term.toLowerCase().trim() : null;
         const referer = data.referrer || req.headers['referer'] || 'Directo / Ads';
 
+        // Find or create synthetic link for direct landing tracker if link_id constraint exists
+        let trackerLinkId = 0;
+        try {
+          const defaultLink = db.prepare("SELECT id FROM links WHERE slug = '__landing_direct'").get();
+          if (defaultLink) {
+            trackerLinkId = defaultLink.id;
+          } else {
+            const ins = db.prepare(`
+              INSERT INTO links (slug, destination_url, campaign_name, channel_name, utm_source, utm_medium)
+              VALUES ('__landing_direct', '${BASE_DOMAIN}', 'Landing Direct', 'Landing Direct', 'direct', 'direct')
+            `).run();
+            trackerLinkId = ins.lastInsertRowid;
+          }
+        } catch (e) {
+          trackerLinkId = 0;
+        }
+
         db.prepare(`
           INSERT INTO clicks (
             link_id, slug, utm_source, utm_medium, utm_campaign, utm_content, utm_term,
             ip_hash, country, city, device_type, browser, os, referer
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
-          null,
+          trackerLinkId,
           'landing_tracker',
           source,
           medium,
