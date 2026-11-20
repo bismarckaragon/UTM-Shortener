@@ -21,6 +21,7 @@ interface AnalyticsData {
     unique_visitors: number;
     total_conversions: number;
     unique_leads: number;
+    tracked_clicks?: number;
     tracked_conversions?: number;
     conversion_rate: number;
   };
@@ -268,7 +269,7 @@ export const AnalyticsDashboard: React.FC = () => {
             {data?.summary.conversion_rate ?? 0}%
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            {data?.summary.tracked_conversions ?? 0} leads de enlaces con clics medidos
+            {data?.summary.tracked_conversions ?? 0} leads de {data?.summary.tracked_clicks ?? data?.summary.total_clicks ?? 0} clics rastreados
           </div>
         </div>
 

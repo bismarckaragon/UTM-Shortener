@@ -682,23 +682,25 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       ${convFilter}
     `).get(campaign ? [campaign] : []);
 
-    // Conversions that match tracked links (to calculate realistic conversion rate without inflating external untracked traffic)
-    const trackedConvSummary = db.prepare(`
-      SELECT COUNT(*) as tracked_conversions
-      FROM conversions c
-      WHERE EXISTS (
-        SELECT 1 FROM links l 
-        WHERE LOWER(l.utm_source) = LOWER(c.utm_source)
-        ${campaign ? 'AND l.campaign_name = ?' : ''}
-      )
-    `).get(campaign ? [campaign] : []);
+    // Conversions that match tracked links (only sources that have actual links created and clicked)
+    const trackedStats = db.prepare(`
+      SELECT 
+        (SELECT COUNT(*) FROM clicks c JOIN links l ON c.link_id = l.id ${linkFilter}) as tracked_clicks,
+        (
+          SELECT COUNT(*) 
+          FROM conversions c
+          WHERE LOWER(c.utm_source) IN (SELECT DISTINCT LOWER(utm_source) FROM links ${linkFilter})
+          ${campaign ? 'AND c.utm_campaign = ?' : ''}
+        ) as tracked_conversions
+    `).get(...params, ...(campaign ? [campaign] : []));
 
     const totalClicksNum = clicksSummary.recorded_clicks || linksSummary.total_clicks || 0;
     const totalConvNum = convSummary?.total_conversions || 0;
-    const trackedConvNum = trackedConvSummary?.tracked_conversions || 0;
+    const trackedClicksNum = trackedStats?.tracked_clicks || linksSummary.total_clicks || 0;
+    const trackedConvNum = trackedStats?.tracked_conversions || 0;
     
-    // Accurate rate: conversions from channels with tracked links / total clicks
-    const convRate = totalClicksNum > 0 ? Number(((trackedConvNum / totalClicksNum) * 100).toFixed(2)) : 0;
+    // Pure rate of tracked channels: tracked leads / tracked clicks
+    const convRate = trackedClicksNum > 0 ? Number(((trackedConvNum / trackedClicksNum) * 100).toFixed(2)) : 0;
 
     const summary = {
       total_links: linksSummary.total_links,
@@ -706,6 +708,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       unique_visitors: clicksSummary.unique_visitors || 0,
       total_conversions: totalConvNum,
       unique_leads: convSummary?.unique_leads || 0,
+      tracked_clicks: trackedClicksNum,
       tracked_conversions: trackedConvNum,
       conversion_rate: convRate
     };
