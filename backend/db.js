@@ -182,8 +182,25 @@ export function initDb() {
     insertTx(defaults);
   }
 
-  // Note: historical WhatsApp unification to 'social' already ran once.
-  // Do NOT overwrite grupos_nuevos / grupos_viejos on startup so new links and clicks stay separated.
+  // One-time tracked migrations table (guarantees each data fix runs strictly ONCE)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS migrations (
+      name TEXT PRIMARY KEY,
+      applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  try {
+    const migName = 'move_initial_groups_conversions_to_social_v1';
+    const alreadyRan = db.prepare('SELECT 1 FROM migrations WHERE name = ?').get(migName);
+    if (!alreadyRan) {
+      const moved = db.prepare(`UPDATE conversions SET utm_medium = 'social' WHERE LOWER(utm_medium) IN ('grupos_nuevos', 'grupos_viejos')`).run();
+      db.prepare('INSERT INTO migrations (name) VALUES (?)').run(migName);
+      console.log(`[DB Migration] ${migName}: movidos ${moved.changes} registros a 'social' para iniciar grupos_nuevos y grupos_viejos en 0.`);
+    }
+  } catch (e) {
+    console.warn('[DB Migration Warning]', e.message);
+  }
 
   // Clean up ONLY broken test clicks tagged as 'direct' or 'directo' from earlier tracker experiments
   try {
