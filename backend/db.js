@@ -151,6 +151,19 @@ export function initDb() {
     insertTx(defaults);
   }
 
+  // One-time data migration: unify historical WhatsApp groups into 'social'
+  try {
+    const checkLinks = db.prepare(`SELECT count(*) as c FROM links WHERE utm_medium IN ('grupos_nuevos', 'grupos_viejos')`).get();
+    if (checkLinks && checkLinks.c > 0) {
+      console.log(`[DB Migration] Unificando enlaces históricos de grupos_nuevos y grupos_viejos a medium = 'social'...`);
+      db.prepare(`UPDATE links SET utm_medium = 'social' WHERE utm_medium IN ('grupos_nuevos', 'grupos_viejos')`).run();
+      db.prepare(`UPDATE clicks SET utm_medium = 'social' WHERE utm_medium IN ('grupos_nuevos', 'grupos_viejos')`).run();
+      console.log(`[DB Migration] Unificación completada exitosamente.`);
+    }
+  } catch (e) {
+    console.warn('[DB Migration Warning]', e.message);
+  }
+
   console.log(`[DB] SQLite database initialized at ${dbPath}`);
 }
 
