@@ -418,6 +418,113 @@ app.post('/api/webhook/conversion', (req, res) => {
   }
 });
 
+// WEBHOOK for Link Sends (from GoHighLevel / GHL Workflows or any automation)
+// Accepts POST (JSON body or query params) and GET (query params)
+function handleLinkSendWebhook(req, res) {
+  try {
+    let payload = {};
+    if (typeof req.body === 'string' && req.body.trim()) {
+      try {
+        payload = JSON.parse(req.body);
+      } catch (e) {
+        payload = {};
+      }
+    } else if (req.body && typeof req.body === 'object') {
+      payload = req.body;
+    }
+
+    // GHL puts custom webhook key-values inside payload.customData OR at root level
+    const custom = (payload.customData && typeof payload.customData === 'object') ? payload.customData : {};
+    const q = req.query || {};
+
+    // Extract slug directly OR from a full short URL (e.g. https://go.juditcatala.com/bf-ig-1)
+    let rawSlug = q.slug || custom.slug || payload.slug || '';
+    const rawUrl = q.url || q.link || q.short_url || custom.url || custom.link || custom.short_url || payload.url || payload.link || payload.short_url || '';
+
+    if (!rawSlug && rawUrl) {
+      try {
+        const parsedUrl = new URL(String(rawUrl).trim());
+        const segments = parsedUrl.pathname.split('/').filter(Boolean);
+        // Handle both /r/:slug and /:slug
+        if (segments.length >= 2 && segments[0] === 'r') {
+          rawSlug = segments[1];
+        } else if (segments.length >= 1) {
+          rawSlug = segments[segments.length - 1];
+        }
+      } catch (e) {
+        // Fallback: take last segment after /
+        const parts = String(rawUrl).trim().split('/').filter(Boolean);
+        rawSlug = parts[parts.length - 1] || '';
+      }
+    }
+
+    const slug = String(rawSlug || '').trim();
+    if (!slug) {
+      return res.status(400).json({
+        error: 'Falta identificar el enlace. Envía "slug" o "link" (ej: ?slug=mi-enlace o {"link": "https://go.juditcatala.com/mi-enlace"}).'
+      });
+    }
+
+    // Find the link in DB (exact match first, then case-insensitive)
+    const link = db.prepare('SELECT id, slug, channel_name, sends_count FROM links WHERE slug = ? OR LOWER(slug) = LOWER(?) LIMIT 1').get(slug, slug);
+
+    const quantityRaw = Number(q.count || q.quantity || custom.count || custom.quantity || payload.count || payload.quantity || 1);
+    const quantity = Number.isFinite(quantityRaw) && quantityRaw > 0 ? Math.floor(quantityRaw) : 1;
+
+    const contactId = String(q.contact_id || custom.contact_id || payload.contact_id || payload.id || '').trim() || null;
+    const contactEmail = String(q.email || custom.email || payload.email || '').trim().toLowerCase() || null;
+    const contactName = String(
+      q.name || q.full_name || custom.name || payload.full_name ||
+      [payload.first_name, payload.last_name].filter(Boolean).join(' ') || ''
+    ).trim() || null;
+    const workflowName = String(
+      q.workflow || q.workflow_name || custom.workflow || custom.workflow_name ||
+      payload.workflow_name || (payload.workflow && payload.workflow.name) || ''
+    ).trim() || null;
+    const channel = String(
+      q.channel || custom.channel || payload.channel || (link && link.channel_name) || ''
+    ).trim() || null;
+
+    db.prepare(`
+      INSERT INTO link_sends (
+        link_id, slug, quantity, contact_id, contact_email, contact_name, workflow_name, channel, raw_payload
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      link ? link.id : null,
+      link ? link.slug : slug,
+      quantity,
+      contactId,
+      contactEmail,
+      contactName,
+      workflowName,
+      channel,
+      JSON.stringify({ query: q, body: payload })
+    );
+
+    if (link) {
+      db.prepare('UPDATE links SET sends_count = COALESCE(sends_count, 0) + ? WHERE id = ?').run(quantity, link.id);
+    }
+
+    const updatedLink = link ? db.prepare('SELECT sends_count, clicks_count FROM links WHERE id = ?').get(link.id) : null;
+
+    res.json({
+      success: true,
+      message: 'Envío registrado con éxito',
+      slug: link ? link.slug : slug,
+      matched_link: Boolean(link),
+      quantity,
+      sends_count: updatedLink ? updatedLink.sends_count : quantity,
+      clicks_count: updatedLink ? updatedLink.clicks_count : 0
+    });
+  } catch (err) {
+    console.error('[Link Send Webhook Error]', err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+app.post('/api/webhook/send', handleLinkSendWebhook);
+app.get('/api/webhook/send', handleLinkSendWebhook);
+
 // BATCH IMPORT CONVERSIONS (e.g. from CSV or historical export)
 app.post('/api/conversions/import', requireAuth, (req, res) => {
   try {
@@ -752,8 +859,74 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     // Pure rate of tracked channels: tracked leads / tracked clicks
     const convRate = trackedClicksNum > 0 ? Number(((trackedConvNum / trackedClicksNum) * 100).toFixed(2)) : 0;
 
+    // Total sends summary (from GHL / automation webhooks)
+    const sendsSummary = db.prepare(`
+      SELECT COALESCE(SUM(ls.quantity), 0) as total_sends
+      FROM link_sends ls
+      LEFT JOIN links l ON ls.link_id = l.id
+      ${linkFilter}
+    `).get(...params);
+
+    const totalSendsNum = sendsSummary?.total_sends || 0;
+
+    // Funnel per shortened link: Enviados (GHL) -> Abiertos (Clics) -> Registros Reales (Leads)
+    const realLinkConditions = ["l.slug NOT LIKE '__direct_%'", "l.slug != '__landing_direct'"];
+    const funnelParams = [];
+    if (linkId) {
+      realLinkConditions.push('l.id = ?');
+      funnelParams.push(linkId);
+    } else if (campaign) {
+      realLinkConditions.push('l.campaign_name = ?');
+      funnelParams.push(campaign);
+    }
+
+    const rawLinkFunnel = db.prepare(`
+      SELECT
+        l.id,
+        l.slug,
+        l.channel_name,
+        l.campaign_name,
+        l.utm_source,
+        l.utm_medium,
+        l.utm_campaign,
+        l.utm_content,
+        l.utm_term,
+        COALESCE((SELECT SUM(ls.quantity) FROM link_sends ls WHERE ls.link_id = l.id OR LOWER(ls.slug) = LOWER(l.slug)), l.sends_count, 0) as sends,
+        COALESCE((SELECT COUNT(*) FROM clicks c WHERE c.link_id = l.id), l.clicks_count, 0) as clicks,
+        (
+          SELECT COUNT(*)
+          FROM conversions conv
+          WHERE LOWER(COALESCE(conv.utm_source, '')) = LOWER(COALESCE(l.utm_source, ''))
+            AND (l.utm_medium IS NULL OR l.utm_medium = '' OR LOWER(COALESCE(conv.utm_medium, '')) = LOWER(l.utm_medium))
+            AND (l.utm_campaign IS NULL OR l.utm_campaign = '' OR LOWER(COALESCE(conv.utm_campaign, '')) = LOWER(l.utm_campaign))
+            AND (l.utm_content IS NULL OR l.utm_content = '' OR LOWER(COALESCE(conv.utm_content, '')) = LOWER(l.utm_content))
+            AND (l.utm_term IS NULL OR l.utm_term = '' OR LOWER(COALESCE(conv.utm_term, '')) = LOWER(l.utm_term))
+        ) as conversions
+      FROM links l
+      WHERE ${realLinkConditions.join(' AND ')}
+      ORDER BY sends DESC, clicks DESC, conversions DESC
+      LIMIT 100
+    `).all(...funnelParams);
+
+    const linkFunnel = rawLinkFunnel.map(row => {
+      const sends = Number(row.sends) || 0;
+      const clicks = Number(row.clicks) || 0;
+      const conversions = Number(row.conversions) || 0;
+      return {
+        ...row,
+        shortUrl: `${BASE_DOMAIN}/${row.slug}`,
+        sends,
+        clicks,
+        conversions,
+        open_rate: sends > 0 ? Number(((clicks / sends) * 100).toFixed(1)) : null,
+        click_to_lead_rate: clicks > 0 ? Number(((conversions / clicks) * 100).toFixed(1)) : null,
+        send_to_lead_rate: sends > 0 ? Number(((conversions / sends) * 100).toFixed(1)) : null
+      };
+    });
+
     const summary = {
       total_links: linksSummary.total_links,
+      total_sends: totalSendsNum,
       total_clicks: totalClicksNum,
       unique_visitors: clicksSummary.unique_visitors || 0,
       total_conversions: totalConvNum,
@@ -890,6 +1063,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     res.json({
       success: true,
       summary,
+      linkFunnel,
       bySource,
       byMedium,
       byContent,

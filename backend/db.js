@@ -105,6 +105,37 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_conversions_timestamp ON conversions(timestamp);
   `);
 
+  // Table for link send events (e.g. from GoHighLevel workflows webhook)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS link_sends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      link_id INTEGER,
+      slug TEXT NOT NULL,
+      quantity INTEGER DEFAULT 1,
+      contact_id TEXT,
+      contact_email TEXT,
+      contact_name TEXT,
+      workflow_name TEXT,
+      channel TEXT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      raw_payload TEXT,
+      FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_link_sends_link_id ON link_sends(link_id);
+    CREATE INDEX IF NOT EXISTS idx_link_sends_slug ON link_sends(slug);
+    CREATE INDEX IF NOT EXISTS idx_link_sends_timestamp ON link_sends(timestamp);
+  `);
+
+  // Gracefully add sends_count column to links table if it doesn't exist
+  try {
+    const linkCols = db.prepare("PRAGMA table_info(links)").all().map(c => c.name);
+    if (!linkCols.includes('sends_count')) {
+      db.exec(`ALTER TABLE links ADD COLUMN sends_count INTEGER DEFAULT 0;`);
+    }
+  } catch (e) {
+    console.warn('[DB Migration Warning - links.sends_count]', e.message);
+  }
+
   // Table for channel presets (so channels persist on the server for any user/device)
   db.exec(`
     CREATE TABLE IF NOT EXISTS channel_presets (
