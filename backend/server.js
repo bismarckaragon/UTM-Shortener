@@ -242,21 +242,32 @@ app.post('/api/track', (req, res) => {
         const term = data.utm_term ? data.utm_term.toLowerCase().trim() : null;
         const referer = data.referrer || req.headers['referer'] || 'Directo / Ads';
 
-        // Find or create synthetic link for direct landing tracker if link_id constraint exists
-        let trackerLinkId = 0;
+        // Find or create synthetic link for direct landing tracker matching the UTMs
+        let trackerLinkId = null;
         try {
-          const defaultLink = db.prepare("SELECT id FROM links WHERE slug = '__landing_direct'").get();
-          if (defaultLink) {
-            trackerLinkId = defaultLink.id;
+          const slugKey = `__direct_${source}_${medium}`.substring(0, 32);
+          const existingLink = db.prepare("SELECT id FROM links WHERE slug = ?").get(slugKey);
+          if (existingLink) {
+            trackerLinkId = existingLink.id;
           } else {
             const ins = db.prepare(`
-              INSERT INTO links (slug, destination_url, campaign_name, channel_name, utm_source, utm_medium)
-              VALUES ('__landing_direct', '${BASE_DOMAIN}', 'Landing Direct', 'Landing Direct', 'direct', 'direct')
-            `).run();
+              INSERT INTO links (slug, destination_url, campaign_name, channel_name, utm_source, utm_medium, utm_campaign, utm_content, utm_term)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+              slugKey,
+              data.url || BASE_DOMAIN,
+              campaign || 'Landing Direct',
+              source.toUpperCase(),
+              source,
+              medium,
+              campaign,
+              content,
+              term
+            );
             trackerLinkId = ins.lastInsertRowid;
           }
         } catch (e) {
-          trackerLinkId = 0;
+          trackerLinkId = null;
         }
 
         db.prepare(`
@@ -758,10 +769,10 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       LIMIT 20
     `).all(campaign ? [campaign] : []);
 
-    // Clicks by UTM Source (including both shortener links and landing tracker)
+    // Clicks by UTM Source (prioritizing tracked link UTMs, fallback to click-level UTMs)
     const bySource = db.prepare(`
       SELECT 
-        COALESCE(COALESCE(c.utm_source, l.utm_source), 'directo') as source, 
+        COALESCE(COALESCE(l.utm_source, c.utm_source), 'directo') as source, 
         COUNT(c.id) as clicks
       FROM clicks c
       LEFT JOIN links l ON c.link_id = l.id
@@ -774,7 +785,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     // Clicks by UTM Medium
     const byMedium = db.prepare(`
       SELECT 
-        COALESCE(COALESCE(c.utm_medium, l.utm_medium), 'ninguno') as medium, 
+        COALESCE(COALESCE(l.utm_medium, c.utm_medium), 'ninguno') as medium, 
         COUNT(c.id) as clicks
       FROM clicks c
       LEFT JOIN links l ON c.link_id = l.id
@@ -787,7 +798,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     // Clicks by UTM Content (Which specific message or ad won)
     const byContent = db.prepare(`
       SELECT 
-        COALESCE(COALESCE(c.utm_content, l.utm_content), 'sin_contenido') as content,
+        COALESCE(COALESCE(l.utm_content, c.utm_content), 'sin_contenido') as content,
         COALESCE(l.channel_name, 'Landing Directo') as channel_name,
         COUNT(c.id) as clicks
       FROM clicks c
