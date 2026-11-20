@@ -107,7 +107,7 @@ app.get('/:slug', (req, res, next) => {
 
 function handleRedirect(req, res, slug) {
   try {
-    const link = db.prepare('SELECT id, destination_url, clicks_count FROM links WHERE slug = ?').get(slug);
+    const link = db.prepare('SELECT id, destination_url, clicks_count, utm_source, utm_medium, utm_campaign, utm_content, utm_term FROM links WHERE slug = ?').get(slug);
 
     if (!link) {
       return res.status(404).send(`
@@ -131,6 +131,24 @@ function handleRedirect(req, res, slug) {
         // Increment link counter
         db.prepare('UPDATE links SET clicks_count = clicks_count + 1 WHERE id = ?').run(link.id);
 
+        // Extract exact UTMs from destination_url first (so clicks always match what the landing form receives), fallback to link columns
+        let clickSource = link.utm_source || null;
+        let clickMedium = link.utm_medium || null;
+        let clickCampaign = link.utm_campaign || null;
+        let clickContent = link.utm_content || null;
+        let clickTerm = link.utm_term || null;
+
+        try {
+          const destUrl = new URL(link.destination_url);
+          if (destUrl.searchParams.get('utm_source')) clickSource = destUrl.searchParams.get('utm_source').toLowerCase().trim();
+          if (destUrl.searchParams.get('utm_medium')) clickMedium = destUrl.searchParams.get('utm_medium').toLowerCase().trim();
+          if (destUrl.searchParams.get('utm_campaign')) clickCampaign = destUrl.searchParams.get('utm_campaign').toLowerCase().trim();
+          if (destUrl.searchParams.get('utm_content')) clickContent = destUrl.searchParams.get('utm_content').toLowerCase().trim();
+          if (destUrl.searchParams.get('utm_term')) clickTerm = destUrl.searchParams.get('utm_term').toLowerCase().trim();
+        } catch (e) {
+          // Keep link column values
+        }
+
         // Parse User Agent
         const ua = req.headers['user-agent'] || '';
         const parser = new UAParser(ua);
@@ -149,11 +167,11 @@ function handleRedirect(req, res, slug) {
 
         const referer = req.headers['referer'] || req.headers['referrer'] || 'Directo / WhatsApp';
 
-        // Insert click record
+        // Insert click record with exact UTMs
         db.prepare(`
-          INSERT INTO clicks (link_id, slug, ip_hash, country, city, device_type, browser, os, referer)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(link.id, slug, ipHashed, country, city, deviceType, browser, os, referer);
+          INSERT INTO clicks (link_id, slug, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip_hash, country, city, device_type, browser, os, referer)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(link.id, slug, clickSource, clickMedium, clickCampaign, clickContent, clickTerm, ipHashed, country, city, deviceType, browser, os, referer);
       } catch (err) {
         console.error('[Analytics Error]', err);
       }
