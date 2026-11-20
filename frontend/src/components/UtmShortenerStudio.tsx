@@ -66,6 +66,9 @@ export const UtmShortenerStudio: React.FC = () => {
   const [campaignTerm, setCampaignTerm] = useState('');
   const [autoShorten, setAutoShorten] = useState(true);
 
+  const [campaignGroups, setCampaignGroups] = useState<{ id: string; name: string }[]>([]);
+  const [selectedCampaignGroup, setSelectedCampaignGroup] = useState<string>('captacion_bf2026');
+
   const [channels, setChannels] = useState<ChannelPreset[]>(() => {
     const saved = localStorage.getItem('omnya_standalone_channels');
     return saved ? JSON.parse(saved) : DEFAULT_CHANNELS;
@@ -97,6 +100,18 @@ export const UtmShortenerStudio: React.FC = () => {
         }
       })
       .catch(err => console.error('Error fetching server channels:', err));
+
+    fetch('/api/campaigns', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(res => res.json())
+      .then(json => {
+        if (json.data && json.data.length > 0) {
+          setCampaignGroups(json.data);
+          setSelectedCampaignGroup(json.data[0].id);
+        }
+      })
+      .catch(err => console.error('Error fetching campaigns:', err));
   }, []);
 
   const toggleChannel = (id: string) => {
@@ -259,7 +274,7 @@ export const UtmShortenerStudio: React.FC = () => {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ items: preparedItems, campaignName })
+          body: JSON.stringify({ items: preparedItems, campaignName, campaignGroup: selectedCampaignGroup })
         });
         const data = await res.json();
         if (data.data) {
@@ -353,6 +368,23 @@ export const UtmShortenerStudio: React.FC = () => {
               onChange={e => setBaseUrl(e.target.value)}
               style={{ width: '100%', padding: '10px 14px', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', color: '#fff', fontSize: '0.9rem' }}
             />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              Grupo / Etapa de Campaña
+            </label>
+            <select
+              value={selectedCampaignGroup}
+              onChange={e => setSelectedCampaignGroup(e.target.value)}
+              style={{ width: '100%', padding: '10px 14px', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', color: '#fff', fontSize: '0.9rem' }}
+            >
+              {campaignGroups.map(cg => (
+                <option key={cg.id} value={cg.id} style={{ background: '#0f172a', color: '#fff' }}>
+                  {cg.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>

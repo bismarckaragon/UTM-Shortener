@@ -12,8 +12,19 @@ import {
   Webhook,
   Copy,
   Check,
-  Send
+  Send,
+  FolderKanban,
+  Plus
 } from 'lucide-react';
+
+interface CampaignGroupItem {
+  id: string;
+  name: string;
+  utm_campaigns: string;
+  links_count?: number;
+  clicks_count?: number;
+  conversions_count?: number;
+}
 
 interface LinkFunnelItem {
   id: number;
@@ -78,15 +89,38 @@ export const AnalyticsDashboard: React.FC = () => {
   const [showWebhookGuide, setShowWebhookGuide] = useState(false);
   const [onlyWithSends, setOnlyWithSends] = useState(false);
 
+  // Campaign Grouping state
+  const [campaigns, setCampaigns] = useState<CampaignGroupItem[]>([]);
+  const [selectedCampaign, setSelectedCampaign] = useState<string>('all');
+  const [showNewCampaign, setShowNewCampaign] = useState(false);
+  const [newCampName, setNewCampName] = useState('');
+  const [newCampUtms, setNewCampUtms] = useState('');
+  const [savingCamp, setSavingCamp] = useState(false);
+
   const webhookUrl = `${window.location.origin}/api/webhook/conversion`;
   const sendWebhookUrl = `${window.location.origin}/api/webhook/send`;
 
-  const fetchAnalytics = async () => {
+  const fetchCampaigns = async () => {
+    const token = localStorage.getItem('omnya_shortener_token') || '';
+    try {
+      const res = await fetch('/api/campaigns', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const json = await res.json();
+      if (json.data) setCampaigns(json.data);
+    } catch (err) {
+      console.error('Error cargando campañas:', err);
+    }
+  };
+
+  const fetchAnalytics = async (groupOverride?: string) => {
     setLoading(true);
     setError('');
     const token = localStorage.getItem('omnya_shortener_token') || '';
+    const activeGroup = groupOverride !== undefined ? groupOverride : selectedCampaign;
+    const qs = activeGroup && activeGroup !== 'all' ? `?campaignGroup=${encodeURIComponent(activeGroup)}` : '';
     try {
-      const res = await fetch('/api/analytics', {
+      const res = await fetch(`/api/analytics${qs}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const json = await res.json();
@@ -100,8 +134,50 @@ export const AnalyticsDashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchAnalytics();
+    fetchCampaigns();
+    fetchAnalytics('all');
   }, []);
+
+  const handleCampaignChange = (val: string) => {
+    setSelectedCampaign(val);
+    fetchAnalytics(val);
+  };
+
+  const handleCreateCampaign = async () => {
+    if (!newCampName.trim()) {
+      alert('Escribe un nombre para la campaña (ej. Venta Black Friday 2026).');
+      return;
+    }
+    setSavingCamp(true);
+    const token = localStorage.getItem('omnya_shortener_token') || '';
+    try {
+      const res = await fetch('/api/campaigns', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: newCampName.trim(),
+          utm_campaigns: newCampUtms.trim()
+        })
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Error creando campaña');
+      setNewCampName('');
+      setNewCampUtms('');
+      setShowNewCampaign(false);
+      await fetchCampaigns();
+      if (json.data?.id) {
+        setSelectedCampaign(json.data.id);
+        fetchAnalytics(json.data.id);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error creando campaña');
+    } finally {
+      setSavingCamp(false);
+    }
+  };
 
   const handleCopyWebhook = () => {
     navigator.clipboard.writeText(webhookUrl);
@@ -177,7 +253,53 @@ export const AnalyticsDashboard: React.FC = () => {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Campaign Group Selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(15, 23, 42, 0.7)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '4px 10px' }}>
+            <FolderKanban size={15} color="var(--primary-hover)" />
+            <select
+              value={selectedCampaign}
+              onChange={(e) => handleCampaignChange(e.target.value)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#fff',
+                fontSize: '0.84rem',
+                fontWeight: 600,
+                outline: 'none',
+                cursor: 'pointer',
+                padding: '4px 2px'
+              }}
+            >
+              <option value="all" style={{ background: '#0f172a', color: '#fff' }}>Todas las campañas</option>
+              {campaigns.map(c => (
+                <option key={c.id} value={c.id} style={{ background: '#0f172a', color: '#fff' }}>
+                  {c.name} ({c.conversions_count ?? 0} leads)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={() => setShowNewCampaign(!showNewCampaign)}
+            style={{
+              background: 'rgba(124, 58, 237, 0.15)',
+              border: '1px solid var(--primary)',
+              color: '#c4b5fd',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              fontSize: '0.84rem',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              cursor: 'pointer'
+            }}
+          >
+            <Plus size={14} />
+            <span>Nueva Campaña</span>
+          </button>
+
           <button
             onClick={() => setShowWebhookGuide(!showWebhookGuide)}
             style={{
@@ -199,7 +321,7 @@ export const AnalyticsDashboard: React.FC = () => {
           </button>
 
           <button
-            onClick={fetchAnalytics}
+            onClick={() => { fetchCampaigns(); fetchAnalytics(); }}
             disabled={loading}
             style={{
               background: 'rgba(255, 255, 255, 0.08)',
@@ -219,6 +341,74 @@ export const AnalyticsDashboard: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Create New Campaign Drawer */}
+      {showNewCampaign && (
+        <div className="glass-card" style={{ padding: '18px 24px', background: 'rgba(15, 23, 42, 0.95)', border: '1px solid var(--primary)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <h4 style={{ margin: 0, color: '#fff', fontSize: '0.96rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <FolderKanban size={16} color="var(--primary-hover)" />
+            <span>Crear Nueva Campaña / Etapa</span>
+          </h4>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', alignItems: 'end' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                Nombre de la Campaña / Etapa *
+              </label>
+              <input
+                type="text"
+                placeholder="ej. Venta Black Friday 2026"
+                value={newCampName}
+                onChange={e => setNewCampName(e.target.value)}
+                style={{ width: '100%', padding: '9px 12px', background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '0.85rem' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                utm_campaign asociados (opcional, separados por coma)
+              </label>
+              <input
+                type="text"
+                placeholder="ej. bf2026_venta, venta-bf-ads"
+                value={newCampUtms}
+                onChange={e => setNewCampUtms(e.target.value)}
+                style={{ width: '100%', padding: '9px 12px', background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '0.85rem' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={handleCreateCampaign}
+                disabled={savingCamp}
+                style={{
+                  background: 'var(--primary)',
+                  border: 'none',
+                  color: '#fff',
+                  padding: '9px 18px',
+                  borderRadius: '6px',
+                  fontWeight: 600,
+                  fontSize: '0.84rem',
+                  cursor: 'pointer'
+                }}
+              >
+                {savingCamp ? 'Guardando...' : 'Crear Campaña'}
+              </button>
+              <button
+                onClick={() => setShowNewCampaign(false)}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-muted)',
+                  padding: '9px 14px',
+                  borderRadius: '6px',
+                  fontSize: '0.84rem',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Webhook Guide Drawer */}
       {showWebhookGuide && (

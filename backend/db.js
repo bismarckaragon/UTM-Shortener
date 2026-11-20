@@ -126,15 +126,40 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_link_sends_timestamp ON link_sends(timestamp);
   `);
 
-  // Gracefully add sends_count column to links table if it doesn't exist
+  // Gracefully add sends_count and campaign_group columns to links table if they don't exist
   try {
     const linkCols = db.prepare("PRAGMA table_info(links)").all().map(c => c.name);
     if (!linkCols.includes('sends_count')) {
       db.exec(`ALTER TABLE links ADD COLUMN sends_count INTEGER DEFAULT 0;`);
     }
+    if (!linkCols.includes('campaign_group')) {
+      db.exec(`ALTER TABLE links ADD COLUMN campaign_group TEXT;`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_links_campaign_group ON links(campaign_group);`);
+    }
   } catch (e) {
-    console.warn('[DB Migration Warning - links.sends_count]', e.message);
+    console.warn('[DB Migration Warning - links]', e.message);
   }
+
+  // Gracefully add campaign_group column to conversions table if it doesn't exist
+  try {
+    const convCols = db.prepare("PRAGMA table_info(conversions)").all().map(c => c.name);
+    if (!convCols.includes('campaign_group')) {
+      db.exec(`ALTER TABLE conversions ADD COLUMN campaign_group TEXT;`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_conversions_campaign_group ON conversions(campaign_group);`);
+    }
+  } catch (e) {
+    console.warn('[DB Migration Warning - conversions]', e.message);
+  }
+
+  // Table for Campaign Groups / Stages (e.g. "Captación Black Friday 2026", "Venta Black Friday 2026")
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS campaigns (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      utm_campaigns TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 
   // Table for channel presets (so channels persist on the server for any user/device)
   db.exec(`
@@ -200,6 +225,23 @@ export function initDb() {
     }
   } catch (e) {
     console.warn('[DB Migration Warning]', e.message);
+  }
+
+  try {
+    const campMigName = 'seed_default_campaign_captacion_bf2026_v1';
+    const campRan = db.prepare('SELECT 1 FROM migrations WHERE name = ?').get(campMigName);
+    if (!campRan) {
+      db.prepare(`
+        INSERT OR IGNORE INTO campaigns (id, name, utm_campaigns)
+        VALUES ('captacion_bf2026', 'Captación Black Friday 2026', 'bf2026,bf26-tt-abo')
+      `).run();
+      db.prepare(`UPDATE links SET campaign_group = 'captacion_bf2026' WHERE campaign_group IS NULL`).run();
+      db.prepare(`UPDATE conversions SET campaign_group = 'captacion_bf2026' WHERE campaign_group IS NULL`).run();
+      db.prepare('INSERT INTO migrations (name) VALUES (?)').run(campMigName);
+      console.log(`[DB Migration] ${campMigName}: toda la data existente agrupada en 'Captación Black Friday 2026'.`);
+    }
+  } catch (e) {
+    console.warn('[DB Migration Warning - campaigns]', e.message);
   }
 
   // Clean up ONLY broken test clicks tagged as 'direct' or 'directo' from earlier tracker experiments

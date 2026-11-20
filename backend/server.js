@@ -364,6 +364,31 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
+// Helper to resolve which campaign_group a given utm_campaign belongs to
+function resolveCampaignGroupForUtm(utmCampaign, explicitGroup = null) {
+  if (explicitGroup && String(explicitGroup).trim()) {
+    return String(explicitGroup).trim();
+  }
+  const cleanUtm = utmCampaign ? String(utmCampaign).toLowerCase().trim() : '';
+  if (cleanUtm) {
+    try {
+      const allCampaigns = db.prepare('SELECT id, utm_campaigns FROM campaigns').all();
+      for (const camp of allCampaigns) {
+        const list = (camp.utm_campaigns || '')
+          .split(',')
+          .map(s => s.trim().toLowerCase())
+          .filter(Boolean);
+        if (list.includes(cleanUtm)) {
+          return camp.id;
+        }
+      }
+    } catch (e) {
+      // Ignore lookup error
+    }
+  }
+  return 'captacion_bf2026';
+}
+
 // WEBHOOK for Conversions (from n8n, Webhook or Form)
 app.post('/api/webhook/conversion', (req, res) => {
   try {
@@ -401,12 +426,14 @@ app.post('/api/webhook/conversion', (req, res) => {
     const posible_bot = payload.posible_bot ? 1 : 0;
     const fecha = payload.fecha ? new Date(payload.fecha).toISOString() : new Date().toISOString();
 
+    const resolvedCampaignGroup = resolveCampaignGroupForUtm(campaign, payload.campaign_group);
+
     const stmt = db.prepare(`
       INSERT INTO conversions (
         email, nombre, evento, lista, variante, pagina, referrer,
         utm_source, utm_medium, utm_campaign, utm_content, utm_term,
-        fbclid, zona_horaria, posible_bot, timestamp, raw_payload
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        fbclid, zona_horaria, posible_bot, timestamp, raw_payload, campaign_group
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -426,7 +453,8 @@ app.post('/api/webhook/conversion', (req, res) => {
       zona_horaria,
       posible_bot,
       fecha,
-      JSON.stringify(payload)
+      JSON.stringify(payload),
+      resolvedCampaignGroup
     );
 
     res.json({ success: true, message: 'Conversión registrada con éxito' });
@@ -614,14 +642,33 @@ app.post('/api/conversions/import', requireAuth, (req, res) => {
 // Create single or batch links
 app.post('/api/links/batch', requireAuth, (req, res) => {
   try {
-    const { items, campaignName } = req.body;
+    const { items, campaignName, campaignGroup } = req.body;
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Debes enviar un arreglo de items con destination_url.' });
     }
 
+    const resolvedGroup = resolveCampaignGroupForUtm(campaignName, campaignGroup);
+
+    // Auto-associate this utm_campaign with the selected campaign group so incoming n8n leads match automatically
+    if (resolvedGroup && campaignName && campaignName.trim()) {
+      try {
+        const cleanUtm = campaignName.trim().toLowerCase().replace(/\s+/g, '_');
+        const campRow = db.prepare('SELECT id, utm_campaigns FROM campaigns WHERE id = ?').get(resolvedGroup);
+        if (campRow) {
+          const existingList = (campRow.utm_campaigns || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (!existingList.includes(cleanUtm)) {
+            existingList.push(cleanUtm);
+            db.prepare('UPDATE campaigns SET utm_campaigns = ? WHERE id = ?').run(existingList.join(','), resolvedGroup);
+          }
+        }
+      } catch (e) {
+        // Ignore auto-link error
+      }
+    }
+
     const insertStmt = db.prepare(`
-      INSERT INTO links (slug, destination_url, campaign_name, channel_name, utm_source, utm_medium, utm_campaign, utm_content, utm_term)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO links (slug, destination_url, campaign_name, channel_name, utm_source, utm_medium, utm_campaign, utm_content, utm_term, campaign_group)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const results = [];
@@ -645,7 +692,8 @@ app.post('/api/links/batch', requireAuth, (req, res) => {
           item.utm_medium || null,
           item.utm_campaign || null,
           item.utm_content || null,
-          item.utm_term || null
+          item.utm_term || null,
+          resolvedGroup
         );
 
         results.push({
@@ -673,11 +721,15 @@ app.post('/api/links/batch', requireAuth, (req, res) => {
 // List all links with stats
 app.get('/api/links', requireAuth, (req, res) => {
   try {
-    const { campaign, search } = req.query;
+    const { campaign, campaignGroup, search } = req.query;
     let query = 'SELECT * FROM links';
     const params = [];
     const conditions = ["slug NOT LIKE '__direct_%'", "slug != '__landing_direct'"];
 
+    if (campaignGroup && campaignGroup !== 'all') {
+      conditions.push('campaign_group = ?');
+      params.push(campaignGroup);
+    }
     if (campaign) {
       conditions.push('campaign_name = ?');
       params.push(campaign);
@@ -726,6 +778,100 @@ app.post('/api/links/delete-batch', requireAuth, (req, res) => {
     const placeholders = ids.map(() => '?').join(',');
     db.prepare(`DELETE FROM links WHERE id IN (${placeholders})`).run(...ids);
     res.json({ success: true, count: ids.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk assign links to a campaign group
+app.post('/api/links/assign-campaign', requireAuth, (req, res) => {
+  try {
+    const { ids, campaignGroup } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0 || !campaignGroup) {
+      return res.status(400).json({ error: 'Debes enviar ids y campaignGroup.' });
+    }
+    const placeholders = ids.map(() => '?').join(',');
+    db.prepare(`UPDATE links SET campaign_group = ? WHERE id IN (${placeholders})`).run(campaignGroup, ...ids);
+    res.json({ success: true, count: ids.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------------------------------------------------------------
+// CAMPAIGNS / STAGES API (Group Links & Analytics by Campaign)
+// -------------------------------------------------------------
+app.get('/api/campaigns', requireAuth, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM campaigns ORDER BY created_at DESC').all();
+    const enriched = rows.map(c => {
+      const linkStats = db.prepare(`
+        SELECT COUNT(*) as links_count, COALESCE(SUM(clicks_count), 0) as clicks_count
+        FROM links
+        WHERE campaign_group = ? AND slug NOT LIKE '__direct_%' AND slug != '__landing_direct'
+      `).get(c.id);
+      const convStats = db.prepare(`
+        SELECT COUNT(*) as conversions_count
+        FROM conversions
+        WHERE campaign_group = ?
+      `).get(c.id);
+      return {
+        ...c,
+        links_count: linkStats?.links_count || 0,
+        clicks_count: linkStats?.clicks_count || 0,
+        conversions_count: convStats?.conversions_count || 0
+      };
+    });
+    res.json({ success: true, data: enriched });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/campaigns', requireAuth, (req, res) => {
+  try {
+    const { id, name, utm_campaigns } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'El nombre de la campaña es obligatorio.' });
+    }
+    const cleanId = (id && String(id).trim()) ||
+      name.trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .substring(0, 40) + '_' + Date.now().toString(36).slice(-3);
+
+    const cleanUtms = (utm_campaigns || '')
+      .split(',')
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean)
+      .join(',');
+
+    db.prepare(`
+      INSERT INTO campaigns (id, name, utm_campaigns)
+      VALUES (?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        utm_campaigns = excluded.utm_campaigns
+    `).run(cleanId, name.trim(), cleanUtms);
+
+    // If utm_campaigns were provided, also assign matching existing conversions without overwriting other groups unless empty
+    if (cleanUtms) {
+      const utmList = cleanUtms.split(',');
+      const placeholders = utmList.map(() => '?').join(',');
+      db.prepare(`UPDATE conversions SET campaign_group = ? WHERE LOWER(utm_campaign) IN (${placeholders})`).run(cleanId, ...utmList);
+    }
+
+    res.json({ success: true, data: { id: cleanId, name: name.trim(), utm_campaigns: cleanUtms } });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/campaigns/:id', requireAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM campaigns WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -805,7 +951,17 @@ app.delete('/api/channels/:id', requireAuth, (req, res) => {
 // -------------------------------------------------------------
 app.get('/api/analytics', requireAuth, (req, res) => {
   try {
-    const { linkId, campaign } = req.query;
+    const { linkId, campaign, campaignGroup } = req.query;
+    const activeGroup = (campaignGroup && campaignGroup !== 'all') ? String(campaignGroup) : null;
+
+    // Resolve UTM campaigns associated with this campaignGroup (if any)
+    let groupUtms = [];
+    if (activeGroup) {
+      const campRow = db.prepare('SELECT utm_campaigns FROM campaigns WHERE id = ?').get(activeGroup);
+      if (campRow && campRow.utm_campaigns) {
+        groupUtms = campRow.utm_campaigns.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      }
+    }
 
     let linkFilter = '';
     const params = [];
@@ -813,6 +969,9 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     if (linkId) {
       linkFilter = 'WHERE l.id = ?';
       params.push(linkId);
+    } else if (activeGroup) {
+      linkFilter = 'WHERE l.campaign_group = ?';
+      params.push(activeGroup);
     } else if (campaign) {
       linkFilter = 'WHERE l.campaign_name = ?';
       params.push(campaign);
@@ -824,16 +983,18 @@ app.get('/api/analytics', requireAuth, (req, res) => {
         COUNT(*) as total_links,
         COALESCE(SUM(clicks_count), 0) as total_clicks
       FROM links l
-      ${linkFilter}
+      ${linkFilter ? linkFilter + " AND l.slug NOT LIKE '__direct_%' AND l.slug != '__landing_direct'" : "WHERE l.slug NOT LIKE '__direct_%' AND l.slug != '__landing_direct'"}
     `).get(...params);
 
     // 2. Real total events and unique visitors directly from clicks table
-    // (includes both shortened links clicks and direct landing page tracking)
     let clicksFilter = '';
     const clickParams = [];
     if (linkId) {
       clicksFilter = 'WHERE link_id = ?';
       clickParams.push(linkId);
+    } else if (activeGroup) {
+      clicksFilter = 'WHERE link_id IN (SELECT id FROM links WHERE campaign_group = ?)';
+      clickParams.push(activeGroup);
     } else if (campaign) {
       clicksFilter = 'WHERE link_id IN (SELECT id FROM links WHERE campaign_name = ?) OR LOWER(utm_campaign) = LOWER(?)';
       clickParams.push(campaign, campaign);
@@ -848,26 +1009,42 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     `).get(...clickParams);
 
     // 3. Conversions summary (total leads, unique leads)
-    const convFilter = campaign ? 'WHERE utm_campaign = ?' : '';
+    let convFilter = '';
+    const convParams = [];
+    if (activeGroup) {
+      if (groupUtms.length > 0) {
+        const ph = groupUtms.map(() => '?').join(',');
+        convFilter = `WHERE (campaign_group = ? OR LOWER(utm_campaign) IN (${ph}))`;
+        convParams.push(activeGroup, ...groupUtms);
+      } else {
+        convFilter = 'WHERE campaign_group = ?';
+        convParams.push(activeGroup);
+      }
+    } else if (campaign) {
+      convFilter = 'WHERE utm_campaign = ?';
+      convParams.push(campaign);
+    }
+
     const convSummary = db.prepare(`
       SELECT 
         COUNT(*) as total_conversions,
         COUNT(DISTINCT email) as unique_leads
       FROM conversions
       ${convFilter}
-    `).get(campaign ? [campaign] : []);
+    `).get(...convParams);
 
     // Conversions that match tracked links (only sources that have actual links created and clicked)
+    const convAliasFilter = convFilter ? convFilter.replace(/^WHERE\s+/i, 'AND ') : '';
     const trackedStats = db.prepare(`
       SELECT 
         (SELECT COUNT(*) FROM clicks c JOIN links l ON c.link_id = l.id ${linkFilter}) as tracked_clicks,
         (
           SELECT COUNT(*) 
           FROM conversions c
-          WHERE LOWER(c.utm_source) IN (SELECT DISTINCT LOWER(utm_source) FROM links ${linkFilter})
-          ${campaign ? 'AND c.utm_campaign = ?' : ''}
+          WHERE LOWER(c.utm_source) IN (SELECT DISTINCT LOWER(utm_source) FROM links l ${linkFilter})
+          ${convAliasFilter}
         ) as tracked_conversions
-    `).get(...params, ...(campaign ? [campaign] : []));
+    `).get(...params, ...params, ...convParams);
 
     const totalClicksNum = clicksSummary.recorded_clicks || linksSummary.total_clicks || 0;
     const totalConvNum = convSummary?.total_conversions || 0;
@@ -893,6 +1070,9 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     if (linkId) {
       realLinkConditions.push('l.id = ?');
       funnelParams.push(linkId);
+    } else if (activeGroup) {
+      realLinkConditions.push('l.campaign_group = ?');
+      funnelParams.push(activeGroup);
     } else if (campaign) {
       realLinkConditions.push('l.campaign_name = ?');
       funnelParams.push(campaign);
@@ -964,7 +1144,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       ${convFilter}
       GROUP BY source
       ORDER BY conversions DESC
-    `).all(campaign ? [campaign] : []);
+    `).all(...convParams);
 
     // Conversions by UTM Medium
     const convByMedium = db.prepare(`
@@ -976,7 +1156,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       ${convFilter}
       GROUP BY medium
       ORDER BY conversions DESC
-    `).all(campaign ? [campaign] : []);
+    `).all(...convParams);
 
     // Conversions by UTM Content (Which specific message converted)
     const convByContent = db.prepare(`
@@ -988,7 +1168,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       ${convFilter}
       GROUP BY content
       ORDER BY conversions DESC
-    `).all(campaign ? [campaign] : []);
+    `).all(...convParams);
 
     // Recent 20 leads
     const recentLeads = db.prepare(`
@@ -997,7 +1177,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       ${convFilter}
       ORDER BY id DESC
       LIMIT 20
-    `).all(campaign ? [campaign] : []);
+    `).all(...convParams);
 
     // Clicks by UTM Source (if c.utm_source exists from tracker, prioritize it over generic synthetic link)
     const bySource = db.prepare(`

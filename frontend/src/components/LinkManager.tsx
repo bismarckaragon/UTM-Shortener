@@ -8,8 +8,14 @@ import {
   Search,
   MousePointerClick,
   CheckSquare,
-  Square
+  Square,
+  FolderKanban
 } from 'lucide-react';
+
+interface CampaignGroupItem {
+  id: string;
+  name: string;
+}
 
 interface LinkItem {
   id: number;
@@ -17,6 +23,7 @@ interface LinkItem {
   shortUrl: string;
   destination_url: string;
   campaign_name: string;
+  campaign_group?: string;
   channel_name: string;
   utm_source: string;
   utm_medium: string;
@@ -28,17 +35,40 @@ interface LinkItem {
 
 export const LinkManager: React.FC = () => {
   const [links, setLinks] = useState<LinkItem[]>([]);
+  const [campaigns, setCampaigns] = useState<CampaignGroupItem[]>([]);
+  const [selectedCampaignFilter, setSelectedCampaignFilter] = useState<string>('all');
+  const [moveTargetCampaign, setMoveTargetCampaign] = useState<string>('');
   const [_loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const fetchLinks = async () => {
-    setLoading(true);
+  const fetchCampaigns = async () => {
     const token = localStorage.getItem('omnya_shortener_token') || '';
     try {
-      const res = await fetch('/api/links', {
+      const res = await fetch('/api/campaigns', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const json = await res.json();
+      if (json.data) {
+        setCampaigns(json.data);
+        if (json.data.length > 0 && !moveTargetCampaign) {
+          setMoveTargetCampaign(json.data[0].id);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchLinks = async (groupOverride?: string) => {
+    setLoading(true);
+    const token = localStorage.getItem('omnya_shortener_token') || '';
+    const activeGroup = groupOverride !== undefined ? groupOverride : selectedCampaignFilter;
+    const qs = activeGroup && activeGroup !== 'all' ? `?campaignGroup=${encodeURIComponent(activeGroup)}` : '';
+    try {
+      const res = await fetch(`/api/links${qs}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const json = await res.json();
@@ -51,8 +81,44 @@ export const LinkManager: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchLinks();
+    fetchCampaigns();
+    fetchLinks('all');
   }, []);
+
+  const handleFilterChange = (val: string) => {
+    setSelectedCampaignFilter(val);
+    setSelectedIds([]);
+    fetchLinks(val);
+  };
+
+  const handleAssignCampaignSelected = async () => {
+    if (selectedIds.length === 0 || !moveTargetCampaign) return;
+    const token = localStorage.getItem('omnya_shortener_token') || '';
+    try {
+      const res = await fetch('/api/links/assign-campaign', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ ids: selectedIds, campaignGroup: moveTargetCampaign })
+      });
+      const json = await res.json();
+      if (json.success) {
+        setSelectedIds([]);
+        fetchLinks();
+      } else {
+        alert(json.error || 'Error moviendo enlaces');
+      }
+    } catch (e) {
+      alert('Error de conexión');
+    }
+  };
+
+  const getCampaignLabel = (groupId?: string) => {
+    if (!groupId) return 'Sin campaña';
+    return campaigns.find(c => c.id === groupId)?.name || groupId;
+  };
 
   const handleCopy = (url: string, id: number) => {
     navigator.clipboard.writeText(url);
@@ -145,27 +211,81 @@ export const LinkManager: React.FC = () => {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           {selectedIds.length > 0 && (
-            <button
-              onClick={handleDeleteSelected}
-              disabled={isDeleting}
+            <>
+              {campaigns.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(124, 58, 237, 0.12)', border: '1px solid var(--primary)', borderRadius: '8px', padding: '4px 8px' }}>
+                  <select
+                    value={moveTargetCampaign}
+                    onChange={(e) => setMoveTargetCampaign(e.target.value)}
+                    style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.8rem', outline: 'none' }}
+                  >
+                    {campaigns.map(c => (
+                      <option key={c.id} value={c.id} style={{ background: '#0f172a', color: '#fff' }}>{c.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleAssignCampaignSelected}
+                    style={{
+                      background: 'var(--primary)',
+                      border: 'none',
+                      color: '#fff',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Mover ({selectedIds.length})
+                  </button>
+                </div>
+              )}
+
+              <button
+                onClick={handleDeleteSelected}
+                disabled={isDeleting}
+                style={{
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid var(--error)',
+                  color: 'var(--error)',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  cursor: 'pointer'
+                }}
+              >
+                <Trash2 size={16} />
+                <span>{isDeleting ? 'Eliminando...' : `Eliminar Seleccionados (${selectedIds.length})`}</span>
+              </button>
+            </>
+          )}
+
+          {/* Campaign Group Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '4px 10px' }}>
+            <FolderKanban size={15} color="var(--primary-hover)" />
+            <select
+              value={selectedCampaignFilter}
+              onChange={(e) => handleFilterChange(e.target.value)}
               style={{
-                background: 'rgba(239, 68, 68, 0.15)',
-                border: '1px solid var(--error)',
-                color: 'var(--error)',
-                padding: '8px 16px',
-                borderRadius: '8px',
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                cursor: 'pointer'
+                background: 'transparent',
+                border: 'none',
+                color: '#fff',
+                fontSize: '0.84rem',
+                outline: 'none',
+                cursor: 'pointer',
+                padding: '4px 2px'
               }}
             >
-              <Trash2 size={16} />
-              <span>{isDeleting ? 'Eliminando...' : `Eliminar Seleccionados (${selectedIds.length})`}</span>
-            </button>
-          )}
+              <option value="all" style={{ background: '#0f172a', color: '#fff' }}>Todas las campañas</option>
+              {campaigns.map(c => (
+                <option key={c.id} value={c.id} style={{ background: '#0f172a', color: '#fff' }}>{c.name}</option>
+              ))}
+            </select>
+          </div>
 
           <div style={{ position: 'relative' }}>
             <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '10px' }} />
@@ -243,7 +363,14 @@ export const LinkManager: React.FC = () => {
                     </td>
                     <td style={{ padding: '12px 14px' }}>
                       <div style={{ fontWeight: 600, color: '#fff' }}>{item.channel_name}</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{item.campaign_name}</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
+                        <span>{item.campaign_name}</span>
+                        {item.campaign_group && (
+                          <span style={{ background: 'rgba(124, 58, 237, 0.18)', color: '#c4b5fd', padding: '1px 6px', borderRadius: '4px', fontSize: '0.68rem', fontWeight: 600 }}>
+                            {getCampaignLabel(item.campaign_group)}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td style={{ padding: '12px 14px' }}>
                       {item.utm_content ? (
