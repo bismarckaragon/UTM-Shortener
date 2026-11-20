@@ -769,10 +769,10 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       LIMIT 20
     `).all(campaign ? [campaign] : []);
 
-    // Clicks by UTM Source (prioritizing tracked link UTMs, fallback to click-level UTMs)
+    // Clicks by UTM Source (if c.utm_source exists from tracker, prioritize it over generic synthetic link)
     const bySource = db.prepare(`
       SELECT 
-        COALESCE(COALESCE(l.utm_source, c.utm_source), 'directo') as source, 
+        COALESCE(COALESCE(c.utm_source, l.utm_source), 'directo') as source, 
         COUNT(c.id) as clicks
       FROM clicks c
       LEFT JOIN links l ON c.link_id = l.id
@@ -785,7 +785,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     // Clicks by UTM Medium
     const byMedium = db.prepare(`
       SELECT 
-        COALESCE(COALESCE(l.utm_medium, c.utm_medium), 'ninguno') as medium, 
+        COALESCE(COALESCE(c.utm_medium, l.utm_medium), 'ninguno') as medium, 
         COUNT(c.id) as clicks
       FROM clicks c
       LEFT JOIN links l ON c.link_id = l.id
