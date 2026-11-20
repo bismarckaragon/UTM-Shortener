@@ -245,6 +245,74 @@ app.post('/api/webhook/conversion', (req, res) => {
   }
 });
 
+// BATCH IMPORT CONVERSIONS (e.g. from CSV or historical export)
+app.post('/api/conversions/import', requireAuth, (req, res) => {
+  try {
+    const { conversions } = req.body;
+    if (!Array.isArray(conversions) || conversions.length === 0) {
+      return res.status(400).json({ error: 'Lista de conversiones requerida' });
+    }
+
+    const stmt = db.prepare(`
+      INSERT INTO conversions (
+        email, nombre, evento, lista, variante, pagina, referrer,
+        utm_source, utm_medium, utm_campaign, utm_content, utm_term,
+        fbclid, zona_horaria, posible_bot, timestamp, raw_payload
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    let imported = 0;
+    const insertMany = db.transaction((rows) => {
+      for (const row of rows) {
+        const email = row.email ? row.email.trim().toLowerCase() : null;
+        const nombre = row.nombre ? row.nombre.trim() : null;
+        const evento = row.evento || 'Black Friday 2026';
+        const lista = row.lista || 'captacion_historica';
+        const variante = row.variante || null;
+        const pagina = row.pagina || null;
+        const referrer = row.referrer || null;
+        const source = row.utm_source ? row.utm_source.toLowerCase().trim() : null;
+        const medium = row.utm_medium ? row.utm_medium.toLowerCase().trim() : null;
+        const campaign = row.utm_campaign ? row.utm_campaign.toLowerCase().trim() : null;
+        const content = row.utm_content ? row.utm_content.toLowerCase().trim() : null;
+        const term = row.utm_term ? row.utm_term.toLowerCase().trim() : null;
+        const fbclid = row.fbclid || null;
+        const zona_horaria = row.zona_horaria || null;
+        const posible_bot = row.posible_bot ? 1 : 0;
+        const fecha = row.fecha ? new Date(row.fecha).toISOString() : new Date().toISOString();
+
+        stmt.run(
+          email,
+          nombre,
+          evento,
+          lista,
+          variante,
+          pagina,
+          referrer,
+          source,
+          medium,
+          campaign,
+          content,
+          term,
+          fbclid,
+          zona_horaria,
+          posible_bot,
+          fecha,
+          JSON.stringify(row)
+        );
+        imported++;
+      }
+    });
+
+    insertMany(conversions);
+
+    res.json({ success: true, count: imported, message: `Se importaron ${imported} contactos exitosamente` });
+  } catch (err) {
+    console.error('[Batch Import Error]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Create single or batch links
 app.post('/api/links/batch', requireAuth, (req, res) => {
   try {

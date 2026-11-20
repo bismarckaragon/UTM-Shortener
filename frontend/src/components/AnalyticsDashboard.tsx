@@ -93,7 +93,7 @@ export const AnalyticsDashboard: React.FC = () => {
     const convObj = data?.convBySource?.find(c => c.source.toLowerCase() === src.toLowerCase());
     const clicks = clickObj ? clickObj.clicks : 0;
     const convs = convObj ? convObj.conversions : 0;
-    const rate = clicks > 0 ? Number(((convs / clicks) * 100).toFixed(1)) : (convs > 0 ? 100 : 0);
+    const rate = clicks > 0 ? Number(((convs / clicks) * 100).toFixed(1)) : null;
     return { source: src, clicks, convs, rate };
   }).sort((a, b) => b.convs - a.convs || b.clicks - a.clicks);
 
@@ -108,7 +108,7 @@ export const AnalyticsDashboard: React.FC = () => {
     const convObj = data?.convByMedium?.find(c => c.medium.toLowerCase() === med.toLowerCase());
     const clicks = clickObj ? clickObj.clicks : 0;
     const convs = convObj ? convObj.conversions : 0;
-    const rate = clicks > 0 ? Number(((convs / clicks) * 100).toFixed(1)) : (convs > 0 ? 100 : 0);
+    const rate = clicks > 0 ? Number(((convs / clicks) * 100).toFixed(1)) : null;
     return { medium: med, clicks, convs, rate };
   }).sort((a, b) => b.convs - a.convs || b.clicks - a.clicks);
 
@@ -124,7 +124,7 @@ export const AnalyticsDashboard: React.FC = () => {
     const clicks = clickObj ? clickObj.clicks : 0;
     const convs = convObj ? convObj.conversions : 0;
     const channel = clickObj?.channel_name || '';
-    const rate = clicks > 0 ? Number(((convs / clicks) * 100).toFixed(1)) : (convs > 0 ? 100 : 0);
+    const rate = clicks > 0 ? Number(((convs / clicks) * 100).toFixed(1)) : null;
     return { content: con, channel, clicks, convs, rate };
   }).sort((a, b) => b.convs - a.convs || b.clicks - a.clicks);
 
@@ -304,8 +304,8 @@ export const AnalyticsDashboard: React.FC = () => {
                 <div key={item.source} style={{ background: 'rgba(0,0,0,0.2)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.88rem' }}>{item.source}</span>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--success)', fontWeight: 600, background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
-                      {item.rate}% conv.
+                    <span style={{ fontSize: '0.8rem', color: item.rate !== null ? 'var(--success)' : 'var(--text-muted)', fontWeight: 600, background: item.rate !== null ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: '4px' }}>
+                      {item.rate !== null ? `${item.rate}% conv.` : 'N/A (sin clics)'}
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
@@ -313,7 +313,7 @@ export const AnalyticsDashboard: React.FC = () => {
                     <strong style={{ color: 'var(--success)' }}>{item.convs} registros reales</strong>
                   </div>
                   <div style={{ width: '100%', height: '5px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-                    <div style={{ width: `${Math.min(100, item.rate)}%`, height: '100%', background: 'linear-gradient(90deg, var(--secondary), var(--success))' }} />
+                    <div style={{ width: `${Math.min(100, item.rate ?? (item.convs > 0 ? 100 : 0))}%`, height: '100%', background: 'linear-gradient(90deg, var(--secondary), var(--success))' }} />
                   </div>
                 </div>
               ))}
@@ -338,8 +338,8 @@ export const AnalyticsDashboard: React.FC = () => {
                 <div key={item.medium} style={{ background: 'rgba(0,0,0,0.2)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.88rem' }}>{item.medium}</span>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--success)', fontWeight: 600, background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
-                      {item.rate}% conv.
+                    <span style={{ fontSize: '0.8rem', color: item.rate !== null ? 'var(--success)' : 'var(--text-muted)', fontWeight: 600, background: item.rate !== null ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: '4px' }}>
+                      {item.rate !== null ? `${item.rate}% conv.` : 'N/A (sin clics)'}
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
@@ -347,7 +347,7 @@ export const AnalyticsDashboard: React.FC = () => {
                     <strong style={{ color: 'var(--success)' }}>{item.convs} registros reales</strong>
                   </div>
                   <div style={{ width: '100%', height: '5px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-                    <div style={{ width: `${Math.min(100, item.rate)}%`, height: '100%', background: 'linear-gradient(90deg, var(--primary), var(--success))' }} />
+                    <div style={{ width: `${Math.min(100, item.rate ?? (item.convs > 0 ? 100 : 0))}%`, height: '100%', background: 'linear-gradient(90deg, var(--primary), var(--success))' }} />
                   </div>
                 </div>
               ))}
@@ -398,14 +398,14 @@ export const AnalyticsDashboard: React.FC = () => {
                     </td>
                     <td style={{ padding: '12px 12px', textAlign: 'center' }}>
                       <span style={{
-                        background: item.rate > 20 ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.05)',
-                        color: item.rate > 20 ? 'var(--success)' : 'var(--text-muted)',
+                        background: item.rate !== null && item.rate > 20 ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.05)',
+                        color: item.rate !== null && item.rate > 20 ? 'var(--success)' : 'var(--text-muted)',
                         padding: '3px 8px',
                         borderRadius: '10px',
                         fontSize: '0.75rem',
                         fontWeight: 700
                       }}>
-                        {item.rate}%
+                        {item.rate !== null ? `${item.rate}%` : 'N/A'}
                       </span>
                     </td>
                   </tr>
