@@ -13,8 +13,8 @@ services:
       - AUTH_SECRET=omnya_secure_random_key_2026
     volumes:
       - shortener_data:/app/backend/data
-    expose:
-      - "4000"
+    ports:
+      - "4000:4000"
 
 volumes:
   shortener_data:
