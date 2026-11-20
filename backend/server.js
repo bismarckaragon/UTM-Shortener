@@ -636,14 +636,24 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     `).get(...params);
 
     // 2. Real total events and unique visitors directly from clicks table
-    const clicksFilter = linkId ? 'WHERE link_id = ?' : campaign ? 'WHERE link_id IN (SELECT id FROM links WHERE campaign_name = ?)' : '';
+    // (includes both shortened links clicks and direct landing page tracking)
+    let clicksFilter = '';
+    const clickParams = [];
+    if (linkId) {
+      clicksFilter = 'WHERE link_id = ?';
+      clickParams.push(linkId);
+    } else if (campaign) {
+      clicksFilter = 'WHERE link_id IN (SELECT id FROM links WHERE campaign_name = ?) OR LOWER(utm_campaign) = LOWER(?)';
+      clickParams.push(campaign, campaign);
+    }
+
     const clicksSummary = db.prepare(`
       SELECT 
         COUNT(*) as recorded_clicks,
         COUNT(DISTINCT ip_hash) as unique_visitors
       FROM clicks
       ${clicksFilter}
-    `).get(...params);
+    `).get(...clickParams);
 
     // 3. Conversions summary (total leads, unique leads)
     const convFilter = campaign ? 'WHERE utm_campaign = ?' : '';
@@ -774,7 +784,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
         country, 
         COUNT(c.id) as clicks
       FROM clicks c
-      JOIN links l ON c.link_id = l.id
+      LEFT JOIN links l ON c.link_id = l.id
       ${linkFilter}
       GROUP BY country
       ORDER BY clicks DESC
@@ -787,7 +797,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
         device_type, 
         COUNT(c.id) as clicks
       FROM clicks c
-      JOIN links l ON c.link_id = l.id
+      LEFT JOIN links l ON c.link_id = l.id
       ${linkFilter}
       GROUP BY device_type
       ORDER BY clicks DESC
@@ -800,7 +810,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
         COUNT(c.id) as clicks,
         COUNT(DISTINCT c.ip_hash) as unique_clicks
       FROM clicks c
-      JOIN links l ON c.link_id = l.id
+      LEFT JOIN links l ON c.link_id = l.id
       ${linkFilter}
       GROUP BY date
       ORDER BY date ASC
