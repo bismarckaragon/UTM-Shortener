@@ -164,10 +164,10 @@ export function initDb() {
     console.warn('[DB Migration Warning]', e.message);
   }
 
-  // Clean up any test clicks tagged as 'direct' or 'directo' from earlier tracker experiments
+  // Clean up ONLY broken test clicks tagged as 'direct' or 'directo' from earlier tracker experiments
   try {
-    db.prepare(`DELETE FROM clicks WHERE utm_source IN ('direct', 'directo') OR slug = 'landing_tracker' AND (utm_source IS NULL OR utm_source IN ('direct', 'directo'))`).run();
-    db.prepare(`DELETE FROM links WHERE slug LIKE '__direct_%' OR slug = '__landing_direct'`).run();
+    db.prepare(`DELETE FROM clicks WHERE slug = 'landing_tracker' AND (utm_source IS NULL OR utm_source IN ('direct', 'directo'))`).run();
+    db.prepare(`DELETE FROM links WHERE slug IN ('__landing_direct', '__direct_directo_ninguno', '__direct_direct_direct')`).run();
   } catch (e) {
     // Ignore if not present
   }

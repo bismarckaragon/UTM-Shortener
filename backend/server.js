@@ -22,6 +22,7 @@ const AUTH_SECRET = process.env.AUTH_SECRET || (process.env.IP_SALT ? process.en
 
 app.use(cors());
 app.use(express.json());
+app.use(express.text({ type: ['text/plain', 'application/json'] }));
 
 // Initialize SQLite DB
 initDb();
@@ -171,7 +172,7 @@ function handleRedirect(req, res, slug) {
 // Lightweight Tracking Script (for landing pages like app.juditcatala.com)
 app.get('/track.js', (req, res) => {
   res.setHeader('Content-Type', 'application/javascript');
-  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.send(`
 (function() {
   try {
@@ -196,13 +197,14 @@ app.get('/track.js', (req, res) => {
         url: window.location.href
       };
 
+      var payloadStr = JSON.stringify(data);
       if (navigator.sendBeacon) {
-        navigator.sendBeacon('${BASE_DOMAIN}/api/track', JSON.stringify(data));
+        navigator.sendBeacon('${BASE_DOMAIN}/api/track', payloadStr);
       } else {
         fetch('${BASE_DOMAIN}/api/track', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
+          headers: { 'Content-Type': 'text/plain' },
+          body: payloadStr,
           keepalive: true
         }).catch(function() {});
       }
@@ -218,7 +220,29 @@ app.get('/track.js', (req, res) => {
 // Endpoint that receives landing page pageviews/clicks from track.js
 app.post('/api/track', (req, res) => {
   try {
-    const data = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    let data = {};
+    if (typeof req.body === 'string' && req.body.trim()) {
+      try {
+        data = JSON.parse(req.body);
+      } catch (e) {
+        data = {};
+      }
+    } else if (req.body && typeof req.body === 'object') {
+      data = req.body;
+    }
+
+    // Fallback to query params if body was empty
+    const rawSource = data.utm_source || req.query.utm_source;
+    const rawMedium = data.utm_medium || req.query.utm_medium;
+    const rawCampaign = data.utm_campaign || req.query.utm_campaign;
+    const rawContent = data.utm_content || req.query.utm_content;
+    const rawTerm = data.utm_term || req.query.utm_term;
+    const rawFbclid = data.fbclid || req.query.fbclid;
+
+    // Ignore empty payloads without any UTM or fbclid
+    if (!rawSource && !rawMedium && !rawCampaign && !rawFbclid) {
+      return res.json({ success: true, skipped: 'no_utms' });
+    }
     
     setImmediate(() => {
       try {
@@ -231,28 +255,42 @@ app.post('/api/track', (req, res) => {
 
         const rawIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || '';
         const ipHashed = hashIp(rawIp);
+
+        // Prevent double counting if user JUST arrived from one of our shortened links (< 60s ago)
+        const recentShortenerClick = db.prepare(`
+          SELECT id FROM clicks 
+          WHERE ip_hash = ? AND slug != 'landing_tracker' 
+          AND timestamp >= datetime('now', '-60 seconds')
+          LIMIT 1
+        `).get(ipHashed);
+
+        if (recentShortenerClick) {
+          return;
+        }
+
         const geo = geoip.lookup(rawIp);
         const country = geo ? geo.country : 'Desconocido';
         const city = geo ? geo.city : 'Desconocido';
 
-        const source = data.utm_source ? data.utm_source.toLowerCase().trim() : 'directo';
-        const medium = data.utm_medium ? data.utm_medium.toLowerCase().trim() : 'ninguno';
-        const campaign = data.utm_campaign ? data.utm_campaign.toLowerCase().trim() : null;
-        const content = data.utm_content ? data.utm_content.toLowerCase().trim() : null;
-        const term = data.utm_term ? data.utm_term.toLowerCase().trim() : null;
+        const source = rawSource ? String(rawSource).toLowerCase().trim() : (rawFbclid ? 'meta' : 'directo');
+        const medium = rawMedium ? String(rawMedium).toLowerCase().trim() : (rawFbclid ? 'paid' : 'ninguno');
+        const campaign = rawCampaign ? String(rawCampaign).toLowerCase().trim() : null;
+        const content = rawContent ? String(rawContent).toLowerCase().trim() : null;
+        const term = rawTerm ? String(rawTerm).toLowerCase().trim() : null;
         const referer = data.referrer || req.headers['referer'] || 'Directo / Ads';
 
         // Find or create synthetic link for direct landing tracker matching the UTMs
         let trackerLinkId = null;
         try {
-          const slugKey = `__direct_${source}_${medium}`.substring(0, 32);
+          const slugKey = `__direct_${source}_${medium}`.replace(/[^a-z0-9_-]/g, '_').substring(0, 48);
           const existingLink = db.prepare("SELECT id FROM links WHERE slug = ?").get(slugKey);
           if (existingLink) {
             trackerLinkId = existingLink.id;
+            db.prepare('UPDATE links SET clicks_count = clicks_count + 1 WHERE id = ?').run(trackerLinkId);
           } else {
             const ins = db.prepare(`
-              INSERT INTO links (slug, destination_url, campaign_name, channel_name, utm_source, utm_medium, utm_campaign, utm_content, utm_term)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO links (slug, destination_url, campaign_name, channel_name, utm_source, utm_medium, utm_campaign, utm_content, utm_term, clicks_count)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             `).run(
               slugKey,
               data.url || BASE_DOMAIN,
@@ -267,6 +305,7 @@ app.post('/api/track', (req, res) => {
             trackerLinkId = ins.lastInsertRowid;
           }
         } catch (e) {
+          console.error('[Track Synthetic Link Error]', e);
           trackerLinkId = null;
         }
 
@@ -512,7 +551,7 @@ app.get('/api/links', requireAuth, (req, res) => {
     const { campaign, search } = req.query;
     let query = 'SELECT * FROM links';
     const params = [];
-    const conditions = [];
+    const conditions = ["slug NOT LIKE '__direct_%'", "slug != '__landing_direct'"];
 
     if (campaign) {
       conditions.push('campaign_name = ?');
