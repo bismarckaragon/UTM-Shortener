@@ -549,9 +549,23 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       ${convFilter}
     `).get(campaign ? [campaign] : []);
 
+    // Conversions that match tracked links (to calculate realistic conversion rate without inflating external untracked traffic)
+    const trackedConvSummary = db.prepare(`
+      SELECT COUNT(*) as tracked_conversions
+      FROM conversions c
+      WHERE EXISTS (
+        SELECT 1 FROM links l 
+        WHERE LOWER(l.utm_source) = LOWER(c.utm_source)
+        ${campaign ? 'AND l.campaign_name = ?' : ''}
+      )
+    `).get(campaign ? [campaign] : []);
+
     const totalClicksNum = clicksSummary.recorded_clicks || linksSummary.total_clicks || 0;
     const totalConvNum = convSummary?.total_conversions || 0;
-    const convRate = totalClicksNum > 0 ? Number(((totalConvNum / totalClicksNum) * 100).toFixed(2)) : 0;
+    const trackedConvNum = trackedConvSummary?.tracked_conversions || 0;
+    
+    // Accurate rate: conversions from channels with tracked links / total clicks
+    const convRate = totalClicksNum > 0 ? Number(((trackedConvNum / totalClicksNum) * 100).toFixed(2)) : 0;
 
     const summary = {
       total_links: linksSummary.total_links,
@@ -559,6 +573,7 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       unique_visitors: clicksSummary.unique_visitors || 0,
       total_conversions: totalConvNum,
       unique_leads: convSummary?.unique_leads || 0,
+      tracked_conversions: trackedConvNum,
       conversion_rate: convRate
     };
 

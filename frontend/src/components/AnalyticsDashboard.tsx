@@ -21,6 +21,7 @@ interface AnalyticsData {
     unique_visitors: number;
     total_conversions: number;
     unique_leads: number;
+    tracked_conversions?: number;
     conversion_rate: number;
   };
   bySource: { source: string; clicks: number }[];
@@ -260,14 +261,14 @@ export const AnalyticsDashboard: React.FC = () => {
 
         <div className="glass-card" style={{ padding: '20px', background: 'rgba(6, 182, 212, 0.08)', border: '1px solid rgba(6, 182, 212, 0.3)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-            <span style={{ fontSize: '0.82rem', color: 'var(--secondary)' }}>Tasa de Conversión</span>
+            <span style={{ fontSize: '0.82rem', color: 'var(--secondary)' }}>Conv. Enlaces Rastreados</span>
             <Percent size={18} color="var(--secondary)" />
           </div>
           <div style={{ fontSize: '1.9rem', fontWeight: 700, color: '#fff' }}>
             {data?.summary.conversion_rate ?? 0}%
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            De cada 100 clics, se registran {(data?.summary.conversion_rate ?? 0)}
+            {data?.summary.tracked_conversions ?? 0} leads de enlaces con clics medidos
           </div>
         </div>
 
